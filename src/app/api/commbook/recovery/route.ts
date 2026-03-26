@@ -1,76 +1,53 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getScoringLeads } from "@/lib/google-sheets";
-import { querySalesforce } from "@/lib/salesforce";
+import {
+  getAllOpportunities,
+  categorizeStage,
+  isRetained,
+  isBookingPlus,
+  type GHLOpportunity,
+} from "@/lib/ghl";
 import { parseDateRange, filterRowsByDate } from "@/lib/date-filter";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
-const BOOKING_STAGES = [
-  "Consultation Booked",
-  "Awaiting Retainer",
-  "Retained/Won",
-  "Closed Won",
-];
-const RETAINED_STAGES = ["Retained/Won", "Closed Won"];
-
-interface SFLead {
-  Id: string;
-  IsConverted: boolean;
-  ConvertedAccountId: string | null;
-}
-
-interface SFOpp {
-  Id: string;
-  StageName: string;
-  Amount: number | null;
-  AccountId: string;
+function scoringContactId(row: Record<string, string>): string {
+  return (row["ID"] || row["SF ID"] || "").trim();
 }
 
 export async function GET(req: NextRequest) {
   try {
     const range = parseDateRange(req.nextUrl.searchParams);
 
-    const [allScoringRaw, sfLeads, sfOpps] = await Promise.all([
+    const [allScoringRaw, allOpps] = await Promise.all([
       getScoringLeads(),
-      querySalesforce<SFLead>(
-        "SELECT Id, IsConverted, ConvertedAccountId FROM Lead"
-      ),
-      querySalesforce<SFOpp>(
-        "SELECT Id, StageName, Amount, AccountId FROM Opportunity"
-      ),
+      getAllOpportunities(),
     ]);
 
     const allScoring = filterRowsByDate(allScoringRaw, range);
 
-    const lead2acct = new Map<string, string>();
-    for (const l of sfLeads) {
-      if (l.IsConverted && l.ConvertedAccountId) {
-        lead2acct.set(l.Id, l.ConvertedAccountId);
-      }
+    const oppsByContact = new Map<string, GHLOpportunity[]>();
+    for (const o of allOpps) {
+      const cid = o.contact?.id;
+      if (!cid) continue;
+      if (!oppsByContact.has(cid)) oppsByContact.set(cid, []);
+      oppsByContact.get(cid)!.push(o);
     }
 
-    const oppsByAcct = new Map<string, SFOpp[]>();
-    for (const o of sfOpps) {
-      if (!oppsByAcct.has(o.AccountId)) oppsByAcct.set(o.AccountId, []);
-      oppsByAcct.get(o.AccountId)!.push(o);
+    function getOppsForLead(contactId: string): GHLOpportunity[] {
+      if (!contactId) return [];
+      return oppsByContact.get(contactId) ?? [];
     }
 
-    function getOppsForLead(sfId: string): SFOpp[] {
-      if (!sfId) return [];
-      const acctId = lead2acct.get(sfId);
-      if (!acctId) return [];
-      return oppsByAcct.get(acctId) || [];
-    }
-
-    function hasBookingOpp(opps: SFOpp[]): boolean {
-      return opps.some((o) => BOOKING_STAGES.includes(o.StageName));
+    function hasBookingOpp(opps: GHLOpportunity[]): boolean {
+      return opps.some((o) => isBookingPlus(categorizeStage(o.stageName)));
     }
 
     const hotLeadsRows = allScoring.filter((r) => {
       const score = parseInt(
         (r["Score"] || "").split("|")[0].trim(),
-        10
+        10,
       );
       return score >= 4;
     });
@@ -78,7 +55,7 @@ export async function GET(req: NextRequest) {
     const score5Rows = allScoring.filter((r) => {
       const score = parseInt(
         (r["Score"] || "").split("|")[0].trim(),
-        10
+        10,
       );
       return score === 5;
     });
@@ -88,47 +65,48 @@ export async function GET(req: NextRequest) {
     const score5Agreed = score5Rows.length;
 
     const neverBookedRows = hotLeadsRows.filter((r) => {
-      const sfId = (r["SF ID"] || "").trim();
-      const opps = getOppsForLead(sfId);
+      const contactId = scoringContactId(r);
+      const opps = getOppsForLead(contactId);
       return !hasBookingOpp(opps);
     });
 
     const neverBooked = neverBookedRows.length;
 
     const neverCalledRows = neverBookedRows.filter((r) => {
-      const sfId = (r["SF ID"] || "").trim();
-      const opps = getOppsForLead(sfId);
+      const contactId = scoringContactId(r);
+      const opps = getOppsForLead(contactId);
       return opps.length === 0;
     });
 
     const neverCalled = neverCalledRows.length;
     const calledNotBooked = neverBooked - neverCalled;
 
-    const retainedOpps = sfOpps.filter(
-      (o) => RETAINED_STAGES.includes(o.StageName) && o.Amount && o.Amount > 0
-    );
+    const retainedOpps = allOpps.filter((o) => {
+      const cat = categorizeStage(o.stageName);
+      return isRetained(cat) && o.monetaryValue && o.monetaryValue > 0;
+    });
     const avgRetainerValue =
       retainedOpps.length > 0
-        ? retainedOpps.reduce((s, o) => s + (o.Amount || 0), 0) /
+        ? retainedOpps.reduce((s, o) => s + (o.monetaryValue || 0), 0) /
           retainedOpps.length
         : 5000;
     const estimatedRecoverableRevenue = Math.round(
-      neverBooked * avgRetainerValue
+      neverBooked * avgRetainerValue,
     );
 
     const convertedRows = allScoring.filter((r) => {
       const score = parseInt(
         (r["Score"] || "").split("|")[0].trim(),
-        10
+        10,
       );
       if (score < 4) return false;
-      const sfId = (r["SF ID"] || "").trim();
-      const opps = getOppsForLead(sfId);
-      return opps.some((o) => RETAINED_STAGES.includes(o.StageName));
+      const contactId = scoringContactId(r);
+      const opps = getOppsForLead(contactId);
+      return opps.some((o) => isRetained(categorizeStage(o.stageName)));
     });
 
     const convertedScores = convertedRows.map((r) =>
-      parseInt((r["Score"] || "").split("|")[0].trim(), 10)
+      parseInt((r["Score"] || "").split("|")[0].trim(), 10),
     );
     const avgConvertedScore =
       convertedScores.length > 0
@@ -148,7 +126,7 @@ export async function GET(req: NextRequest) {
     const feeAgreedCount = convertedRows.filter((r) => {
       const score = parseInt(
         (r["Score"] || "").split("|")[0].trim(),
-        10
+        10,
       );
       return score === 5;
     }).length;
@@ -172,7 +150,7 @@ export async function GET(req: NextRequest) {
       let matchScore = 0;
       const score = parseInt(
         (r["Score"] || "").split("|")[0].trim(),
-        10
+        10,
       );
       if (score >= convertedProfile.avgScore) matchScore += 40;
       else if (score >= convertedProfile.avgScore - 0.5) matchScore += 20;
@@ -180,7 +158,7 @@ export async function GET(req: NextRequest) {
       const dmCount =
         parseInt(
           (r["DM Count"] || r["DM Messages"] || "0").trim(),
-          10
+          10,
         ) || 0;
       if (dmCount >= convertedProfile.avgDmMessages) matchScore += 35;
       else if (dmCount >= convertedProfile.avgDmMessages * 0.5) matchScore += 15;

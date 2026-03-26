@@ -2,37 +2,46 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from "next/server";
-import { querySalesforce } from "@/lib/salesforce";
+import {
+  getAllOpportunities,
+  categorizeStage,
+  isRetained,
+  isBookingPlus,
+} from "@/lib/ghl";
 import { getScoringLeads } from "@/lib/google-sheets";
 import { normalizeSource } from "@/lib/normalize-source";
-import { parseDateRange, soqlDateFilter, filterRowsByDate } from "@/lib/date-filter";
+import { parseDateRange, filterRowsByDate, type DateRange } from "@/lib/date-filter";
+
+function oppCreatedInReportRange(createdAt: string, range: DateRange | null): boolean {
+  const day = createdAt.slice(0, 10);
+  if (!range) {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const start = `${y}-${pad(m + 1)}-01`;
+    const lastDay = new Date(y, m + 1, 0).getDate();
+    const end = `${y}-${pad(m + 1)}-${pad(lastDay)}`;
+    return day >= start && day <= end;
+  }
+  return day >= range.from && day <= range.to;
+}
 
 export async function GET(req: NextRequest) {
   try {
     const params = req.nextUrl.searchParams;
     const range = parseDateRange(params);
-    const dateClause = soqlDateFilter(range);
 
-    const [sfOpps, sfAllTime, scoringRows] = await Promise.all([
-      querySalesforce<{
-        Id: string;
-        StageName: string;
-        LeadSource: string | null;
-        Amount: number | null;
-      }>(
-        `SELECT Id, StageName, LeadSource, Amount FROM Opportunity WHERE ${dateClause}`
-      ),
-      querySalesforce<{
-        LeadSource: string | null;
-        StageName: string;
-        cnt: number;
-      }>(
-        `SELECT LeadSource, StageName, COUNT(Id) cnt FROM Opportunity GROUP BY LeadSource, StageName`
-      ),
+    const [allOpps, scoringRows] = await Promise.all([
+      getAllOpportunities(),
       getScoringLeads(),
     ]);
 
     const filtered = filterRowsByDate(scoringRows, range);
+
+    const oppsInRange = allOpps.filter((o) =>
+      oppCreatedInReportRange(o.createdAt, range),
+    );
 
     const sourceMap = new Map<
       string,
@@ -68,20 +77,18 @@ export async function GET(req: NextRequest) {
     const bookedBySource = new Map<string, number>();
     const retainedBySource = new Map<string, number>();
     const revenueBySource = new Map<string, number>();
-    for (const opp of sfOpps) {
-      const src = normalizeSource(opp.LeadSource || "");
-      if (
-        opp.StageName === "Consultation Booked" ||
-        opp.StageName === "Awaiting Retainer" ||
-        opp.StageName === "Retained/Won" ||
-        opp.StageName === "Closed Won" ||
-        opp.StageName === "Retained"
-      ) {
+    for (const opp of oppsInRange) {
+      const cat = categorizeStage(opp.stageName);
+      const src = normalizeSource(opp.source || "");
+      if (isBookingPlus(cat)) {
         bookedBySource.set(src, (bookedBySource.get(src) ?? 0) + 1);
       }
-      if (opp.StageName === "Retained/Won" || opp.StageName === "Closed Won" || opp.StageName === "Retained") {
+      if (isRetained(cat)) {
         retainedBySource.set(src, (retainedBySource.get(src) ?? 0) + 1);
-        revenueBySource.set(src, (revenueBySource.get(src) ?? 0) + (opp.Amount ?? 0));
+        revenueBySource.set(
+          src,
+          (revenueBySource.get(src) ?? 0) + (opp.monetaryValue ?? 0),
+        );
       }
     }
 
@@ -109,23 +116,17 @@ export async function GET(req: NextRequest) {
       })
       .sort((a, b) => b.totalLeads - a.totalLeads);
 
-    // All-time SF source comparison
     const sfMap = new Map<string, { booked: number; retained: number; total: number }>();
-    for (const row of sfAllTime) {
-      const src = normalizeSource(row.LeadSource || "Unknown");
+    for (const opp of allOpps) {
+      const src = normalizeSource(opp.source || "Unknown");
+      const cat = categorizeStage(opp.stageName);
       const entry = sfMap.get(src) ?? { booked: 0, retained: 0, total: 0 };
-      entry.total += row.cnt;
-      if (
-        row.StageName === "Consultation Booked" ||
-        row.StageName === "Awaiting Retainer" ||
-        row.StageName === "Retained/Won" ||
-        row.StageName === "Closed Won" ||
-        row.StageName === "Retained"
-      ) {
-        entry.booked += row.cnt;
+      entry.total += 1;
+      if (isBookingPlus(cat)) {
+        entry.booked += 1;
       }
-      if (row.StageName === "Retained/Won" || row.StageName === "Closed Won" || row.StageName === "Retained") {
-        entry.retained += row.cnt;
+      if (isRetained(cat)) {
+        entry.retained += 1;
       }
       sfMap.set(src, entry);
     }
@@ -138,7 +139,7 @@ export async function GET(req: NextRequest) {
     console.error("[leads/sources]", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Internal error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

@@ -2,51 +2,63 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from "next/server";
-import { querySalesforce } from "@/lib/salesforce";
+import {
+  getAllOpportunities,
+  categorizeStage,
+  isRetained,
+  isBookingPlus,
+} from "@/lib/ghl";
 import { normalizeSource } from "@/lib/normalize-source";
-import { parseDateRange, soqlDateFilter } from "@/lib/date-filter";
+import { parseDateRange, type DateRange } from "@/lib/date-filter";
 
-const RETAINED_STAGES = "'Retained/Won', 'Closed Won'";
-const CONSULT_STAGES = "'Consultation Booked', 'Awaiting Retainer'";
-const ALL_STAGES = `${RETAINED_STAGES}, ${CONSULT_STAGES}`;
+function oppCreatedInReportRange(createdAt: string, range: DateRange | null): boolean {
+  const day = createdAt.slice(0, 10);
+  if (!range) {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const start = `${y}-${pad(m + 1)}-01`;
+    const lastDay = new Date(y, m + 1, 0).getDate();
+    const end = `${y}-${pad(m + 1)}-${pad(lastDay)}`;
+    return day >= start && day <= end;
+  }
+  return day >= range.from && day <= range.to;
+}
 
-interface SFOpp {
-  Id: string;
-  Name: string;
-  Amount: number | null;
-  LeadSource: string | null;
-  CreatedDate: string;
-  CloseDate: string | null;
-  StageName: string;
+function inRevenueFunnel(cat: string): boolean {
+  return isBookingPlus(cat) || cat === "Consultation Booked";
 }
 
 export async function GET(req: NextRequest) {
   try {
     const params = req.nextUrl.searchParams;
     const range = parseDateRange(params);
-    const dateClause = soqlDateFilter(range);
 
-    const [opps, allTimeOpps] = await Promise.all([
-      querySalesforce<SFOpp>(
-        `SELECT Id, Name, Amount, LeadSource, CreatedDate, CloseDate, StageName FROM Opportunity WHERE StageName IN (${ALL_STAGES}) AND ${dateClause}`
-      ),
-      querySalesforce<SFOpp>(
-        `SELECT Id, Amount, CloseDate, StageName FROM Opportunity WHERE StageName IN (${RETAINED_STAGES})`
-      ),
-    ]);
+    const allOpps = await getAllOpportunities();
 
-    const isRetained = (s: string) => s === "Retained/Won" || s === "Closed Won";
+    const opps = allOpps.filter((o) => {
+      const cat = categorizeStage(o.stageName);
+      return oppCreatedInReportRange(o.createdAt, range) && inRevenueFunnel(cat);
+    });
 
-    const retainedOpps = opps.filter((o) => isRetained(o.StageName));
-    const consultOpps = opps.filter((o) => !isRetained(o.StageName));
+    const allTimeOpps = allOpps.filter((o) =>
+      isRetained(categorizeStage(o.stageName)),
+    );
 
-    const retainerRevenue = retainedOpps.reduce((s, o) => s + (o.Amount ?? 0), 0);
-    const consultationRevenue = consultOpps.reduce((s, o) => s + (o.Amount ?? 0), 0);
+    const retainedOpps = opps.filter((o) =>
+      isRetained(categorizeStage(o.stageName)),
+    );
+    const consultOpps = opps.filter(
+      (o) => !isRetained(categorizeStage(o.stageName)),
+    );
+
+    const retainerRevenue = retainedOpps.reduce((s, o) => s + (o.monetaryValue ?? 0), 0);
+    const consultationRevenue = consultOpps.reduce((s, o) => s + (o.monetaryValue ?? 0), 0);
     const totalRevenue = retainerRevenue + consultationRevenue;
     const totalRetained = retainedOpps.length;
     const avgRevenuePerRetained = totalRetained > 0 ? Math.round(totalRevenue / totalRetained) : 0;
 
-    // Monthly retained for last 6 months
     const now = new Date();
     const monthlyMap = new Map<string, number>();
     for (let i = 5; i >= 0; i--) {
@@ -54,7 +66,7 @@ export async function GET(req: NextRequest) {
       monthlyMap.set(`${String(d.getMonth() + 1).padStart(2, "0")}`, 0);
     }
     for (const opp of retainedOpps) {
-      const dt = opp.CloseDate || opp.CreatedDate;
+      const dt = opp.updatedAt || opp.createdAt;
       if (!dt) continue;
       const mm = dt.slice(5, 7);
       if (monthlyMap.has(mm)) {
@@ -63,12 +75,11 @@ export async function GET(req: NextRequest) {
     }
     const monthlyRetained = Array.from(monthlyMap.entries()).map(([month, count]) => ({ month, count }));
 
-    // Revenue by source (from retained opps only for source stats)
     const sourceAgg = new Map<string, { totalRevenue: number; retainers: number }>();
     for (const opp of retainedOpps) {
-      const src = normalizeSource(opp.LeadSource || "");
+      const src = normalizeSource(opp.source || "");
       const entry = sourceAgg.get(src) ?? { totalRevenue: 0, retainers: 0 };
-      entry.totalRevenue += opp.Amount ?? 0;
+      entry.totalRevenue += opp.monetaryValue ?? 0;
       entry.retainers++;
       sourceAgg.set(src, entry);
     }
@@ -83,19 +94,17 @@ export async function GET(req: NextRequest) {
       }))
       .sort((a, b) => b.totalRevenue - a.totalRevenue);
 
-    // All-time SF stats
-    const sfTotalRevenue = allTimeOpps.reduce((s, o) => s + (o.Amount ?? 0), 0);
+    const sfTotalRevenue = allTimeOpps.reduce((s, o) => s + (o.monetaryValue ?? 0), 0);
     const sfTotalRetained = allTimeOpps.length;
     const sfAvgPerRetained = sfTotalRetained > 0 ? Math.round(sfTotalRevenue / sfTotalRetained) : 0;
 
-    // Monthly retained for all-time (last 6 months from all-time data)
     const sfMonthlyMap = new Map<string, number>();
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       sfMonthlyMap.set(`${String(d.getMonth() + 1).padStart(2, "0")}`, 0);
     }
     for (const opp of allTimeOpps) {
-      const dt = opp.CloseDate;
+      const dt = opp.updatedAt;
       if (!dt) continue;
       const mm = dt.slice(5, 7);
       if (sfMonthlyMap.has(mm)) {
@@ -121,7 +130,7 @@ export async function GET(req: NextRequest) {
     console.error("[leads/revenue]", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Internal error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
