@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
       booked: false,
       retained: false,
       createdAt: row["Date Created"] || "",
-      sfId: row["SF ID"] || "",
+      sfId: row["ID"] || "",
     }));
 
     return NextResponse.json({ leads, sources, total, page, pageSize, totalPages });

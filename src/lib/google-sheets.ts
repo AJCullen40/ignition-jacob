@@ -3,8 +3,9 @@
  * Uses public CSV export.
  */
 
-const COMMENTS_SHEET_ID = '19yfOuHlm6yOlZBAFbKo2ZT4BCt5E2QO-D7UqK9XATzI';
-const SCORING_SHEET_ID = '1NJxV_RKkr4lAKm9e47QvpLxh6DBLWvEcdf4mPg82M5U';
+const COMMENTS_SHEET_ID = '1PgJcRYNNYRp8fLRsdivN3NxgqFoK1-vlid22PIXmZAs';
+const SCORING_SHEET_ID = '1FY1yRBAYzhJvKivwIrV-4BzSawKyJF4XO59FeLMM5Bo';
+const FB_LEAD_FORM_SHEET_ID = '17w6wq8iD-32lfOWoXo1Mo-nOY4CpN5RX0KEdTi47krs';
 
 // ---------- In-memory cache ----------
 type CacheEntry<T> = { data: T; ts: number };
@@ -164,7 +165,7 @@ export async function getComments(): Promise<{ fbIg: Record<string, string>[]; y
 
   try {
     const fbIgUrl = `https://docs.google.com/spreadsheets/d/${COMMENTS_SHEET_ID}/export?format=csv&gid=0&range=K:P`;
-    const ytUrl = `https://docs.google.com/spreadsheets/d/${COMMENTS_SHEET_ID}/export?format=csv&gid=427395799&range=K:P`;
+    const ytUrl = `https://docs.google.com/spreadsheets/d/${COMMENTS_SHEET_ID}/export?format=csv&gid=757216095&range=K:P`;
     const [fbIgCsv, ytCsv] = await Promise.all([
       fetch(fbIgUrl, { cache: 'no-store', signal: AbortSignal.timeout(25000), redirect: 'follow' })
         .then(async r => {
@@ -233,7 +234,7 @@ export async function getFBLeadFormData(): Promise<Record<string, string>[]> {
     return fbLeadFormCache.entry.data;
   }
   try {
-    const url = `https://docs.google.com/spreadsheets/d/${COMMENTS_SHEET_ID}/export?format=csv&gid=534677439`;
+    const url = `https://docs.google.com/spreadsheets/d/${FB_LEAD_FORM_SHEET_ID}/export?format=csv&gid=0`;
     const res = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(25000), redirect: 'follow' });
     if (!res.ok) throw new Error(`FB Lead Form fetch failed: ${res.status}`);
     const text = await res.text();

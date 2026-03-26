@@ -18,7 +18,7 @@ export function normalizeSource(raw: string): string {
   if (sl.includes("brad show live")) return "Brad Show Live";
   if (sl.includes("brad & squeeze") || sl.includes("brad &amp; squeeze") || sl.includes("squeeze show")) return "Brad & Squeeze Show";
   if (sl.includes("real brad bernstein") && sl.includes("facebook")) return "Facebook";
-  if (sl.includes("facebook") || sl.includes("fb") || sl.includes("faceook") || sl.includes("m.facebook.com") || sl.includes("l.facebook.com") || sl.includes("lm.facebook.com") || sl.includes("meta.com") || sl === "meta") return "Facebook";
+  if (sl.includes("facebook") || sl.includes("fb") || sl.includes("faceook") || sl.includes("m.facebook.com") || sl.includes("l.facebook.com") || sl.includes("lm.facebook.com") || sl.includes("meta.com") || sl === "meta" || sl === "fb lead form") return "Facebook";
 
   // TikTok
   if (sl.includes("tiktok") || sl.includes("tik tok") || sl.includes("tiktok.com")) return "TikTok";
@@ -27,7 +27,7 @@ export function normalizeSource(raw: string): string {
   if (sl.includes("youtube") || sl.includes("yt") || sl.includes("youtube.com") || sl.includes("m.youtube.com")) return "YouTube";
 
   // Website / Forms
-  if (sl.includes("lawsb.com") || sl.includes("website") || sl.includes("web") || sl === "chat widget" || sl === "website widget" || sl.includes("website form")) return "Website";
+  if (sl.includes("lawsb.com") || sl.includes("h1b.biz") || sl.includes("website") || sl.includes("web") || sl === "chat widget" || sl === "website widget" || sl.includes("website form") || sl.includes("consult landing page")) return "Website";
   if (sl.includes("linktree") || sl.includes("linktr.ee") || sl.includes("l.wl.co")) return "Website";
   if (sl === "api" || sl.includes("api v1") || sl.includes("api ")) return "WhatsApp";
 
@@ -106,11 +106,10 @@ export function normalizeSource(raw: string): string {
  */
 export function normalizeCommentSource(raw: string): string {
   const s = (raw ?? "").trim().toLowerCase();
-  if (s.includes("bradbernsteinlaw") && s.includes("instagram")) return "bradbernsteinlaw_ (IG)";
-  if (s.includes("sparbernsteinlaw") && s.includes("instagram")) return "sparbernsteinlaw (IG)";
-  if (s.includes("brad bernstein") && s.includes("facebook") && !s.includes("show")) return "Brad Bernstein, Esq (FB)";
-  if (s.includes("brad show live") && s.includes("facebook")) return "Brad Show Live (FB)";
-  if (s.includes("bradbernsteinlaw") && s.includes("youtube")) return "BradBernsteinLaw (YT)";
+  if (s.includes("jacob sapochnick") && s.includes("youtube")) return "Jacob Sapochnick (YT)";
+  if (s.includes("sandiegoimmigrationlawyer") && s.includes("instagram")) return "sandiegoimmigrationlawyer (IG)";
+  if (s.includes("jacob") && s.includes("instagram")) return "Jacob Sapochnick (IG)";
+  if (s.includes("jacob") && s.includes("facebook")) return "Jacob Sapochnick (FB)";
   if (s.includes("youtube")) return "YouTube";
   if (s.includes("instagram")) return "Instagram";
   if (s.includes("facebook")) return "Facebook";

@@ -3,8 +3,8 @@ export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from "next/server";
 import { getScoringLeads } from "@/lib/google-sheets";
-import { parseDateRange, filterRowsByDate, soqlDateFilter } from "@/lib/date-filter";
-import { querySalesforce } from "@/lib/salesforce";
+import { parseDateRange, filterRowsByDate } from "@/lib/date-filter";
+import { getAllOpportunities, categorizeStage, isBookingPlus } from "@/lib/ghl";
 import { normalizeSource } from "@/lib/normalize-source";
 
 const HEATMAP_SOURCES = [
@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
       sourceScoreCounts[src] = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
     }
 
-    const sfIdToScore: Record<string, number> = {};
+    const ghlIdToScore: Record<string, number> = {};
 
     for (const row of filtered) {
       const s = parseInt((row["Score"] || "").match(/^(\d+)/)?.[1] || "0", 10);
@@ -43,8 +43,8 @@ export async function GET(req: NextRequest) {
       const bucket = HEATMAP_SOURCES.includes(src) ? src : "Other";
       sourceScoreCounts[bucket][s]++;
 
-      const sfId = (row["SF ID"] || "").trim();
-      if (sfId) sfIdToScore[sfId] = s;
+      const ghlId = (row["ID"] || "").trim();
+      if (ghlId) ghlIdToScore[ghlId] = s;
     }
 
     const avgScore = scored > 0 ? Math.round((totalScore / scored) * 100) / 100 : 0;
@@ -62,20 +62,25 @@ export async function GET(req: NextRequest) {
       total: Object.values(sourceScoreCounts[source]).reduce((a, b) => a + b, 0),
     }));
 
-    // Booking data from Salesforce
     const bookingCountByScore: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
     try {
-      const dateClause = soqlDateFilter(range, "CreatedDate");
-      const soql = `SELECT Id FROM Opportunity WHERE StageName IN ('Consultation Booked','Awaiting Retainer','Retained/Won','Closed Won') AND ${dateClause}`;
-      const opps = await querySalesforce<{ Id: string }>(soql);
-      for (const opp of opps) {
-        const score = sfIdToScore[opp.Id];
+      const allOpps = await getAllOpportunities();
+      const oppsInRange = range
+        ? allOpps.filter((o) => {
+            const d = (o.createdAt || "").slice(0, 10);
+            return d >= range.from && d <= range.to;
+          })
+        : allOpps;
+      for (const opp of oppsInRange) {
+        const cat = categorizeStage(opp.stageName);
+        if (!isBookingPlus(cat)) continue;
+        const score = ghlIdToScore[opp.contact?.id || ""];
         if (score && score >= 1 && score <= 5) {
           bookingCountByScore[score]++;
         }
       }
     } catch (e) {
-      console.warn("[leads/scores] Salesforce booking query failed, returning zeros:", e);
+      console.warn("[leads/scores] GHL booking query failed:", e);
     }
 
     const bookingsByScore = [1, 2, 3, 4, 5].map((score) => ({

@@ -49,10 +49,11 @@ interface DrilldownData {
 
 const STAGE_COLORS: Record<string, string> = {
   "New Leads": "#9ca3af",
-  "Lead Outreach": "#3b82f6",
-  "Lead Qualified": "#8b5cf6",
-  "Consultation Booked": "#f59e0b",
-  "Awaiting Retainer": "#22c55e",
+  "Lead Responded": "#3b82f6",
+  "Qualified": "#8b5cf6",
+  "Consultation": "#f59e0b",
+  "Paid Consultation": "#22c55e",
+  "Agreement Sent": "#14b8a6",
   Retained: "#a855f7",
 };
 
@@ -219,7 +220,7 @@ export default function PipelinePage() {
       {!error && loading && (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
-            {Array.from({ length: 6 }).map((_, i) => (
+            {Array.from({ length: 7 }).map((_, i) => (
               <SkeletonCard key={i} />
             ))}
           </div>
