@@ -2,50 +2,76 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from "next/server";
-import { querySalesforce } from "@/lib/salesforce";
+import {
+  getAllOpportunities,
+  categorizeStage,
+  isRetained,
+} from "@/lib/ghl";
 import { getScoringLeads } from "@/lib/google-sheets";
 import { normalizeSource } from "@/lib/normalize-source";
-import { parseDateRange, soqlDateFilter, filterRowsByDate } from "@/lib/date-filter";
+import { parseDateRange, filterRowsByDate } from "@/lib/date-filter";
+
+function isoDate(dt: string): string {
+  return (dt || "").slice(0, 10);
+}
+
+/** Match SOQL THIS_MONTH when no explicit range: calendar month in UTC. */
+function oppInOverviewRange(
+  createdAt: string,
+  range: { from: string; to: string } | null,
+): boolean {
+  const d = isoDate(createdAt);
+  if (!range) {
+    const now = new Date();
+    const y = now.getUTCFullYear();
+    const m = now.getUTCMonth();
+    const from = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10);
+    const to = new Date(Date.UTC(y, m + 1, 0)).toISOString().slice(0, 10);
+    return d >= from && d <= to;
+  }
+  return d >= range.from && d <= range.to;
+}
 
 export async function GET(req: NextRequest) {
   try {
     const params = req.nextUrl.searchParams;
     const range = parseDateRange(params);
-    const dateClause = soqlDateFilter(range);
 
-    const [sfOpps, scoringRows] = await Promise.all([
-      querySalesforce<{
-        Id: string;
-        StageName: string;
-        Amount: number | null;
-        CreatedDate: string;
-      }>(
-        `SELECT Id, StageName, Amount, CreatedDate FROM Opportunity WHERE ${dateClause}`
-      ),
+    const [allOpps, scoringRows] = await Promise.all([
+      getAllOpportunities(),
       getScoringLeads(),
     ]);
+
+    const sfOpps = allOpps.filter((o) => oppInOverviewRange(o.createdAt, range));
 
     const filtered = filterRowsByDate(scoringRows, range);
 
     const totalLeads = filtered.length;
 
     const stageCounts: Record<string, number> = {};
-    for (const o of sfOpps) stageCounts[o.StageName] = (stageCounts[o.StageName] || 0) + 1;
+    for (const o of sfOpps) {
+      const c = categorizeStage(o.stageName);
+      stageCounts[c] = (stageCounts[c] || 0) + 1;
+    }
 
-    const retainedRaw =
-      (stageCounts["Retained/Won"] || 0) +
-      (stageCounts["Closed Won"] || 0) +
-      (stageCounts["Retained"] || 0);
-    const awaitingRetainerRaw = stageCounts["Awaiting Retainer"] || 0;
-    const consultBookedRaw = stageCounts["Consultation Booked"] || 0;
-    const leadQualified = stageCounts["Lead Qualified"] || 0;
+    const retainedRaw = sfOpps.filter((o) =>
+      isRetained(categorizeStage(o.stageName)),
+    ).length;
+    const awaitingRetainerRaw =
+      (stageCounts["Agreement Sent"] || 0) +
+      (stageCounts["Paid Consultation"] || 0);
+    const consultBookedRaw = stageCounts["Paid Consultation"] || 0;
+    const leadQualified =
+      (stageCounts["Qualified"] || 0) + (stageCounts["Hot Lead"] || 0);
 
-    const consultationBooked = consultBookedRaw + awaitingRetainerRaw + retainedRaw;
-    const awaitingRetainer = awaitingRetainerRaw + retainedRaw;
+    const agreementSentRaw = stageCounts["Agreement Sent"] || 0;
+    const consultationBooked =
+      consultBookedRaw + agreementSentRaw + retainedRaw;
+    const awaitingRetainer = agreementSentRaw + retainedRaw;
     const retained = retainedRaw;
     const totalRevenue = sfOpps
-      .filter((o) => (o.StageName === "Retained/Won" || o.StageName === "Closed Won") && o.Amount)
-      .reduce((sum, o) => sum + (o.Amount ?? 0), 0);
+      .filter((o) => isRetained(categorizeStage(o.stageName)) && o.monetaryValue)
+      .reduce((sum, o) => sum + (o.monetaryValue ?? 0), 0);
 
     const scoreCounts: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
     for (const row of filtered) {
