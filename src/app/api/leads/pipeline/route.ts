@@ -2,42 +2,24 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from "next/server";
-import { querySalesforce } from "@/lib/salesforce";
+import {
+  getAllOpportunities,
+  categorizeStage,
+  PIPELINE_DISPLAY_STAGES,
+} from "@/lib/ghl";
 import { getScoringLeads } from "@/lib/google-sheets";
 import { normalizeSource } from "@/lib/normalize-source";
 import { parseDateRange, filterRowsByDate } from "@/lib/date-filter";
 
-const PIPELINE_STAGES = [
-  "New Leads",
-  "Lead Outreach",
-  "Lead Qualified",
-  "Consultation Booked",
-  "Awaiting Retainer",
-  "Retained",
-];
-
-const STAGE_COLORS: Record<string, string> = {
-  "New Leads": "#9ca3af",
-  "Lead Outreach": "#3b82f6",
-  "Lead Qualified": "#8b5cf6",
-  "Consultation Booked": "#f59e0b",
-  "Awaiting Retainer": "#22c55e",
-  Retained: "#a855f7",
-};
-
-const STAGE_ALIASES: Record<string, string> = {
-  "Retained/Won": "Retained",
-  "Closed Won": "Retained",
-};
-
-interface SFOpp {
-  StageName: string;
-  Id: string;
-  CreatedDate: string;
-}
-
 function isoDate(dt: string): string {
   return (dt || "").slice(0, 10);
+}
+
+function displayLabelForCategory(cat: string): string | null {
+  for (const { label, categories } of PIPELINE_DISPLAY_STAGES) {
+    if (categories.includes(cat)) return label;
+  }
+  return null;
 }
 
 export async function GET(req: NextRequest) {
@@ -49,20 +31,17 @@ export async function GET(req: NextRequest) {
     const scoreFilter = params.get("score");
     const originFilter = params.get("origin");
 
-    const [allSfOpps, scoringRows] = await Promise.all([
-      querySalesforce<SFOpp>(
-        "SELECT StageName, Id, CreatedDate FROM Opportunity",
-      ),
+    const [allOpps, scoringRows] = await Promise.all([
+      getAllOpportunities(),
       getScoringLeads(),
     ]);
 
-    // Filter SF Opportunities by date in JavaScript (not SOQL)
-    const sfOpps = range
-      ? allSfOpps.filter((o) => {
-          const d = isoDate(o.CreatedDate);
+    const ghOpps = range
+      ? allOpps.filter((o) => {
+          const d = isoDate(o.createdAt);
           return d >= range.from && d <= range.to;
         })
-      : allSfOpps;
+      : allOpps;
 
     const filtered = filterRowsByDate(scoringRows, range);
 
@@ -90,31 +69,28 @@ export async function GET(req: NextRequest) {
           })
         : filtered;
 
-    let sfIdSet: Set<string> | null = null;
+    let contactIdSet: Set<string> | null = null;
     if (sourceFilter || scoreFilter || originFilter) {
-      sfIdSet = new Set(
-        applicableRows.map((r) => r["SF ID"]).filter(Boolean),
+      contactIdSet = new Set(
+        applicableRows.map((r) => (r["ID"] || "").trim()).filter(Boolean),
       );
     }
 
     const stageCounts = new Map<string, number>();
-    for (const stage of PIPELINE_STAGES) stageCounts.set(stage, 0);
+    for (const { label } of PIPELINE_DISPLAY_STAGES) stageCounts.set(label, 0);
 
-    const sfIdsInPipeline = new Set<string>();
-    for (const opp of sfOpps) {
-      if (sfIdSet && !sfIdSet.has(opp.Id)) continue;
-      const mapped = STAGE_ALIASES[opp.StageName] ?? opp.StageName;
-      const current = stageCounts.get(mapped);
-      if (current !== undefined) {
-        stageCounts.set(mapped, current + 1);
-        sfIdsInPipeline.add(opp.Id);
-      }
+    for (const opp of ghOpps) {
+      if (contactIdSet && !contactIdSet.has(opp.contact.id)) continue;
+      const cat = categorizeStage(opp.stageName);
+      const label = displayLabelForCategory(cat);
+      if (label === null) continue;
+      stageCounts.set(label, (stageCounts.get(label) ?? 0) + 1);
     }
 
-    const stages = PIPELINE_STAGES.map((stage) => ({
-      label: stage,
-      count: stageCounts.get(stage) ?? 0,
-      color: STAGE_COLORS[stage] ?? "#9ca3af",
+    const stages = PIPELINE_DISPLAY_STAGES.map(({ label, color }) => ({
+      label,
+      count: stageCounts.get(label) ?? 0,
+      color,
     }));
 
     const sourceSet = new Set<string>();

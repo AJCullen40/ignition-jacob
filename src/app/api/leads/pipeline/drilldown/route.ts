@@ -2,27 +2,23 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from "next/server";
-import { querySalesforce } from "@/lib/salesforce";
+import {
+  getAllOpportunities,
+  categorizeStage,
+  PIPELINE_DISPLAY_STAGES,
+} from "@/lib/ghl";
 import { getScoringLeads } from "@/lib/google-sheets";
 import { parseDateRange } from "@/lib/date-filter";
 import { normalizeSource } from "@/lib/normalize-source";
 
-const STAGE_ALIASES: Record<string, string> = {
-  "Retained/Won": "Retained",
-  "Closed Won": "Retained",
-};
-
-interface SFOpp {
-  Id: string;
-  StageName: string;
-  Name: string;
-  LeadSource: string | null;
-  CreatedDate: string;
-  Amount: number | null;
-}
-
 function isoDate(dt: string): string {
   return (dt || "").slice(0, 10);
+}
+
+/** Strip case-type suffix after dash for name matching (e.g. "Kumar Phagoo - H1B LP"). */
+function nameBaseForMatch(name: string): string {
+  const base = (name || "").split(/\s*[-–]\s*/)[0]?.trim().toLowerCase() ?? "";
+  return base;
 }
 
 export async function GET(req: NextRequest) {
@@ -36,43 +32,40 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    const stageConfig = PIPELINE_DISPLAY_STAGES.find((s) => s.label === stage);
+    if (!stageConfig) {
+      return NextResponse.json(
+        { error: `Unknown stage: ${stage}` },
+        { status: 400 },
+      );
+    }
+
+    const allowedCategories = new Set(stageConfig.categories);
+
     const range = parseDateRange(params);
 
     const [allOpps, scoringRows] = await Promise.all([
-      querySalesforce<SFOpp>(
-        "SELECT Id, StageName, Name, LeadSource, CreatedDate, Amount FROM Opportunity",
-      ),
+      getAllOpportunities(),
       getScoringLeads(),
     ]);
 
     const opps = range
       ? allOpps.filter((o) => {
-          const d = isoDate(o.CreatedDate);
+          const d = isoDate(o.createdAt);
           return d >= range.from && d <= range.to;
         })
       : allOpps;
 
-    // Resolve stage aliases for matching
-    const targetStages: string[] = [];
-    if (stage === "Retained") {
-      targetStages.push("Retained", "Retained/Won", "Closed Won");
-    } else {
-      targetStages.push(stage);
-      for (const [alias, mapped] of Object.entries(STAGE_ALIASES)) {
-        if (mapped === stage) targetStages.push(alias);
-      }
-    }
+    const stageOpps = opps.filter((o) =>
+      allowedCategories.has(categorizeStage(o.stageName)),
+    );
 
-    const stageOpps = opps.filter((o) => targetStages.includes(o.StageName));
-
-    // Build SF ID → scoring sheet row lookup
-    const sfIdToRow = new Map<string, Record<string, string>>();
+    const idToRow = new Map<string, Record<string, string>>();
     for (const row of scoringRows) {
-      const sfId = (row["SF ID"] || "").trim();
-      if (sfId) sfIdToRow.set(sfId, row);
+      const id = (row["ID"] || "").trim();
+      if (id) idToRow.set(id, row);
     }
 
-    // Build name-based matching (first+last → row)
     const nameToRow = new Map<string, Record<string, string>>();
     for (const row of scoringRows) {
       const name =
@@ -82,7 +75,6 @@ export async function GET(req: NextRequest) {
       if (name && name.length > 2) nameToRow.set(name, row);
     }
 
-    // Build phone-based matching
     const phoneToRow = new Map<string, Record<string, string>>();
     for (const row of scoringRows) {
       const phone = (row["phone number"] || row["Phone"] || "")
@@ -91,28 +83,19 @@ export async function GET(req: NextRequest) {
       if (phone.length >= 7) phoneToRow.set(phone, row);
     }
 
-    function cleanOppName(name: string): string {
-      return name
-        .replace(/\s*[-–]\s*(IMM|PI|Retainer|Immigration|imm|pi|ESTATE|Estate|WC|DISSOLUTION|Disso|Corp|CORP|Criminal|CRIM|Div|DIV).*$/i, "")
-        .replace(/\s*[-–]\s*$/, "")
-        .trim()
-        .toLowerCase();
-    }
-
     const leads = stageOpps.map((opp) => {
-      let row = sfIdToRow.get(opp.Id);
+      let row = idToRow.get(opp.contact.id);
 
       if (!row) {
-        const cleaned = cleanOppName(opp.Name || "");
-        if (cleaned.length > 2) row = nameToRow.get(cleaned);
+        const base = nameBaseForMatch(opp.name || "");
+        if (base.length > 2) row = nameToRow.get(base);
       }
 
       if (!row) {
-        const parts = (opp.Name || "").split(/\s*[-–]\s*/);
-        if (parts.length > 0) {
-          const justName = parts[0].trim().toLowerCase();
-          if (justName.length > 2) row = nameToRow.get(justName);
-        }
+        const phone = (opp.contact.phone || "")
+          .replace(/\D/g, "")
+          .slice(-10);
+        if (phone.length >= 7) row = phoneToRow.get(phone);
       }
 
       const score = row
@@ -120,17 +103,21 @@ export async function GET(req: NextRequest) {
         : null;
 
       const conversation = row
-        ? (row["Conversation History"] || row["Conversation History "] || "").trim()
+        ? (
+            row["Conversation History"] ||
+            row["Conversation History "] ||
+            ""
+          ).trim()
         : "";
 
       return {
-        sfId: opp.Id,
-        name: opp.Name || "—",
-        stage: STAGE_ALIASES[opp.StageName] ?? opp.StageName,
-        source: normalizeSource(opp.LeadSource || ""),
-        sfSource: opp.LeadSource || "—",
-        date: isoDate(opp.CreatedDate),
-        amount: opp.Amount ?? 0,
+        sfId: opp.id,
+        name: opp.name || "—",
+        stage: categorizeStage(opp.stageName),
+        source: normalizeSource(opp.source || ""),
+        sfSource: opp.source || "—",
+        date: isoDate(opp.createdAt),
+        amount: opp.monetaryValue ?? 0,
         score,
         conversation,
         phone: row ? (row["phone number"] || row["Phone"] || "").trim() : "",
