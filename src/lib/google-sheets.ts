@@ -4,16 +4,27 @@
  */
 
 const COMMENTS_SHEET_ID = '1PgJcRYNNYRp8fLRsdivN3NxgqFoK1-vlid22PIXmZAs';
-const SCORING_SHEET_ID = '1FY1yRBAYzhJvKivwIrV-4BzSawKyJF4XO59FeLMM5Bo';
+/** Jacob / LawSB AI scoring workbook — also default target for reconciliation tab sync */
+export const SCORING_SHEET_ID = '1FY1yRBAYzhJvKivwIrV-4BzSawKyJF4XO59FeLMM5Bo';
 const FB_LEAD_FORM_SHEET_ID = '17w6wq8iD-32lfOWoXo1Mo-nOY4CpN5RX0KEdTi47krs';
 
-// ---------- In-memory cache ----------
+// ---------- In-memory cache (survives HMR via globalThis) ----------
 type CacheEntry<T> = { data: T; ts: number };
 const SHEET_CACHE_TTL = 15 * 60 * 1000; // 15 minutes
 
-const scoringCache: { entry: CacheEntry<Record<string, string>[]> | null } = { entry: null };
-const commentsCache: { entry: CacheEntry<{ fbIg: Record<string, string>[]; youtube: Record<string, string>[] }> | null } = { entry: null };
-const fbLeadFormCache: { entry: CacheEntry<Record<string, string>[]> | null } = { entry: null };
+interface SheetCaches {
+  scoring: CacheEntry<Record<string, string>[]> | null;
+  comments: CacheEntry<{ fbIg: Record<string, string>[]; youtube: Record<string, string>[] }> | null;
+  fbLeadForm: CacheEntry<Record<string, string>[]> | null;
+}
+
+const _g = globalThis as unknown as { __sheetCaches?: SheetCaches };
+if (!_g.__sheetCaches) {
+  _g.__sheetCaches = { scoring: null, comments: null, fbLeadForm: null };
+}
+const scoringCache = { get entry() { return _g.__sheetCaches!.scoring; }, set entry(v) { _g.__sheetCaches!.scoring = v; } };
+const commentsCache = { get entry() { return _g.__sheetCaches!.comments; }, set entry(v) { _g.__sheetCaches!.comments = v; } };
+const fbLeadFormCache = { get entry() { return _g.__sheetCaches!.fbLeadForm; }, set entry(v) { _g.__sheetCaches!.fbLeadForm = v; } };
 
 function isFresh<T>(c: CacheEntry<T> | null): c is CacheEntry<T> {
   return c !== null && (Date.now() - c.ts) < SHEET_CACHE_TTL;
@@ -43,6 +54,23 @@ export type ScoringRow = {
   retained: boolean;
 };
 
+/** Fetch a published tab as parsed rows (same export URL as rest of Jacob sheets). */
+export async function fetchPublicSheetTabCsv(
+  sheetId: string,
+  gid: string,
+  range?: string,
+): Promise<Record<string, string>[]> {
+  const rangeParam = range ? `&range=${encodeURIComponent(range)}` : "";
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}${rangeParam}`;
+  const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(25000), redirect: "follow" });
+  if (!res.ok) throw new Error(`Sheet export failed: ${res.status}`);
+  const text = await res.text();
+  if (text.trimStart().startsWith("<!DOCTYPE") || text.trimStart().startsWith("<html")) {
+    throw new Error("Sheet returned HTML (check publish / gid)");
+  }
+  return parseCSV(text);
+}
+
 // ---------- Fetch ----------
 async function fetchSheetCSV(sheetId: string, gid: string = '0'): Promise<string> {
   // Use gviz/tq endpoint with CSV output — faster than full export for large sheets
@@ -61,7 +89,7 @@ async function fetchSheetCSV(sheetId: string, gid: string = '0'): Promise<string
 }
 
 // ---------- Robust CSV parser ----------
-function parseCSV(rawCsv: string): Record<string, string>[] {
+export function parseCSV(rawCsv: string): Record<string, string>[] {
   // Strip NUL bytes from the entire input before parsing
   const csv = rawCsv.replace(/\0/g, '');
 
