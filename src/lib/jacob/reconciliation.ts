@@ -334,6 +334,50 @@ export function buildReconciliationReport(
 }
 
 /** Build A1 grid for Google Sheets tab (summary + blank + detail + channel section). */
+function csvEscape(cell: string): string {
+  if (/[",\n\r]/.test(cell)) return `"${cell.replace(/"/g, '""')}"`;
+  return cell;
+}
+
+export function reconciliationDetailsToCsv(
+  details: ReconciliationDetailRow[],
+): string {
+  const headers = [
+    "Contact ID",
+    "Name",
+    "Assigned Agent",
+    "Lead Source Channel",
+    "GHL Stage",
+    "Bucket",
+    "Calls 7d outbound",
+    "Last call UTC",
+    "Called",
+    "Source GHL/RC",
+    "Consult booked",
+  ];
+  const lines = [
+    headers.join(","),
+    ...details.map((d) =>
+      [
+        d.contactId,
+        d.contactName,
+        d.assignedAgent,
+        d.leadSourceChannel,
+        d.stageName,
+        d.scoreBucket,
+        String(d.callsLast7Days),
+        d.lastCallAt ?? "",
+        d.calledRecently ? "Yes" : "No",
+        d.sourceSystem,
+        d.consultationBooked ? "Yes" : "No",
+      ]
+        .map(csvEscape)
+        .join(","),
+    ),
+  ];
+  return lines.join("\n");
+}
+
 export function reconciliationToSheetValues(
   report: ReturnType<typeof buildReconciliationReport>,
 ): (string | number)[][] {

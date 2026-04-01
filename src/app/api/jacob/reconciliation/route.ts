@@ -11,6 +11,7 @@ import {
   buildAgentSummaryFromDetails,
   buildChannelBreakdownFromDetails,
   buildReconciliationReport,
+  reconciliationDetailsToCsv,
 } from "@/lib/jacob/reconciliation";
 
 async function loadReport() {
@@ -54,6 +55,17 @@ export async function GET(req: NextRequest) {
             channelBreakdown: buildChannelBreakdownFromDetails(details),
           }
         : report;
+
+    if (req.nextUrl.searchParams.get("format") === "csv") {
+      const csv = reconciliationDetailsToCsv(filtered.details);
+      return new NextResponse(csv, {
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition":
+            'attachment; filename="jacob-assigned-vs-called.csv"',
+        },
+      });
+    }
 
     return NextResponse.json(filtered);
   } catch (e) {

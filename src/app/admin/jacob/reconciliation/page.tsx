@@ -53,6 +53,8 @@ export default function JacobReconciliationPage() {
     return s ? `?${s}` : "";
   }, [agentFilter, channelFilter]);
 
+  const csvHref = `/api/jacob/reconciliation${qs ? `${qs}&` : "?"}format=csv`;
+
   const load = useCallback(async () => {
     setLoading(true);
     setErr(null);
@@ -153,6 +155,12 @@ export default function JacobReconciliationPage() {
         >
           {syncing ? "Syncing…" : "Push to Sheets tab"}
         </button>
+        <a
+          href={csvHref}
+          className="rounded-lg border border-gray-300 text-gray-800 px-4 py-2 text-sm font-medium bg-white inline-flex items-center"
+        >
+          Download CSV (filtered)
+        </a>
       </div>
       {err && (
         <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-3">

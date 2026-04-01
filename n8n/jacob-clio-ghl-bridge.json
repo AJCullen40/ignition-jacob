@@ -1,0 +1,102 @@
+{
+  "name": "Jacob — Clio webhook → GHL + Sheets log",
+  "meta": {
+    "description": "Import into n8n on pilot.ignitionsystems.io. 1) Create Clio webhooks for agreement sent/signed and payment. 2) Map matter → GHL contact ID (custom field or lookup table). 3) Set env/credentials: GHL_API_KEY, GHL_LOCATION_ID, GHL_CUSTOM_FIELD_AGREEMENT, GHL_CUSTOM_FIELD_PAYMENT, GHL_CUSTOM_FIELD_CASE_VALUE, IGNITION_CLIO_LOG_URL (POST https://your-app.vercel.app/api/jacob/clio/log), JACOB_CLIO_INBOUND_SECRET. 4) Create intelligence workbook tab 'Clio Sync' with header row: Received (UTC) | Event | GHL Contact ID | Clio Matter ID | Agreement Status | Payment Status | Case Value | Notes | Raw JSON"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "jacob-clio-bridge",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook-clio",
+      "name": "Clio Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "replace-after-import"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Map Clio payload → normalized body (adjust keys to your Clio JSON)\nconst b = $json.body || $json;\nconst event = b.event_type || b.type || 'agreement_sent';\nreturn [{\n  json: {\n    event,\n    ghlContactId: b.ghl_contact_id || b.custom_fields?.ghl_contact_id,\n    clioMatterId: b.matter_id || b.id,\n    agreementStatus: b.agreement_status,\n    paymentStatus: b.payment_status,\n    caseValue: b.case_value || b.amount,\n    matterNotes: b.notes || b.description || '',\n    raw: b\n  }\n}];"
+      },
+      "id": "code-map",
+      "name": "Map Clio fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://rest.gohighlevel.com/v1/contacts/{{$json.ghlContactId}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{$env.GHL_API_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ tags: [], customField: [] }) }}",
+        "options": {}
+      },
+      "id": "http-ghl",
+      "name": "GHL update contact (fill custom fields)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 200],
+      "notes": "Replace jsonBody with real customField IDs for Agreement Status, Payment Status, Case Value. Add pipeline stage move via separate GHL API call if required."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.IGNITION_CLIO_LOG_URL}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.JACOB_CLIO_INBOUND_SECRET}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  receivedAt: new Date().toISOString(),\n  event: $json.event,\n  ghlContactId: $json.ghlContactId,\n  clioMatterId: $json.clioMatterId,\n  agreementStatus: $json.agreementStatus,\n  paymentStatus: $json.paymentStatus,\n  caseValue: $json.caseValue,\n  matterNotes: $json.matterNotes,\n  raw: $json.raw\n}) }}",
+        "options": {}
+      },
+      "id": "http-log",
+      "name": "POST Clio row to Ignition",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 400]
+    }
+  ],
+  "connections": {
+    "Clio Webhook": {
+      "main": [[{ "node": "Map Clio fields", "type": "main", "index": 0 }]]
+    },
+    "Map Clio fields": {
+      "main": [
+        [
+          { "node": "GHL update contact (fill custom fields)", "type": "main", "index": 0 },
+          { "node": "POST Clio row to Ignition", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  }
+}
