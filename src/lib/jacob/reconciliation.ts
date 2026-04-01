@@ -1,6 +1,10 @@
 import type { GHLOpportunity } from "@/lib/ghl";
 import type { CallLogFetchInfo } from "@/lib/jacob/call-log";
 import {
+  getOpportunitySourceAgentMap,
+  resolveAssignedAgentFromOpportunitySource,
+} from "@/lib/jacob/opportunity-source-agents";
+import {
   categorizeStage,
   getAssignedAgentName,
   isBookingPlus,
@@ -331,9 +335,14 @@ export function buildReconciliationReport(
     assumeOutboundWhenDirectionBlank: boolean;
     note: string;
   };
+  assignment: {
+    mode: "opportunity_source_map" | "ghl_opportunity_fields";
+    sourceMapEntries: number;
+  };
 } {
   const callIdx = indexCallLog(callRows, nowMs);
   const leadSourceById = scoringRowsToLeadSourceByContactId(scoringRows);
+  const sourceAgentMap = getOpportunitySourceAgentMap();
 
   const warmHot = opps.filter((o) => isWarmOrHotPipelineStage(o.stageName));
 
@@ -353,11 +362,16 @@ export function buildReconciliationReport(
   const details: ReconciliationDetailRow[] = warmHot.map((opp) => {
     const contactId = opp.contact?.id || "";
     const name = (opp.contact?.name || opp.name || "").trim() || "—";
-    const agent = getAssignedAgentName(opp);
     const channel =
       leadSourceById.get(contactId) ||
       (opp.source || "").trim() ||
       "Unknown";
+    const agent = resolveAssignedAgentFromOpportunitySource(
+      opp.source || "",
+      channel,
+      sourceAgentMap,
+      getAssignedAgentName(opp),
+    );
     const stats = statsForOpportunity(
       contactId,
       opp.contact?.phone,
@@ -455,6 +469,13 @@ export function buildReconciliationReport(
       assumeOutboundWhenDirectionBlank:
         callIdx.meta.assumeOutboundWhenDirectionBlank,
       note,
+    },
+    assignment: {
+      mode:
+        sourceAgentMap.size > 0
+          ? "opportunity_source_map"
+          : "ghl_opportunity_fields",
+      sourceMapEntries: sourceAgentMap.size,
     },
   };
 }

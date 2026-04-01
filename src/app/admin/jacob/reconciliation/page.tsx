@@ -54,6 +54,10 @@ export default function JacobReconciliationPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [callLog, setCallLog] = useState<CallLogInfo | null>(null);
+  const [assignment, setAssignment] = useState<{
+    mode: string;
+    sourceMapEntries: number;
+  } | null>(null);
 
   const qs = useMemo(() => {
     const p = new URLSearchParams();
@@ -79,6 +83,27 @@ export default function JacobReconciliationPage() {
       setDetails(data.details || []);
       setChannels(data.channelBreakdown || []);
       setGeneratedAt(data.generatedAt || "");
+      if (data.callLog) {
+        setCallLog({
+          source: data.callLog.source,
+          configured: data.callLog.configured,
+          rowsInTab: data.callLog.rowsInTab,
+          rowsMatchedLast7d: data.callLog.rowsMatchedLast7d,
+          assumeOutboundWhenDirectionBlank:
+            data.callLog.assumeOutboundWhenDirectionBlank,
+          note: data.callLog.note,
+        });
+      } else {
+        setCallLog(null);
+      }
+      if (data.assignment) {
+        setAssignment({
+          mode: data.assignment.mode,
+          sourceMapEntries: data.assignment.sourceMapEntries,
+        });
+      } else {
+        setAssignment(null);
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed to load");
     } finally {
@@ -123,6 +148,16 @@ export default function JacobReconciliationPage() {
           ) — not from GHL’s native call report. Last 7 days, outbound rows (or
           all rows if Direction is blank and assume-outbound is on).
         </p>
+        {assignment && (
+          <div className="mt-3 text-sm rounded-lg px-4 py-3 border bg-slate-50 border-slate-200 text-slate-900">
+            <p className="font-medium">Agent assignment</p>
+            <p className="mt-1 text-xs opacity-90">
+              {assignment.mode === "opportunity_source_map"
+                ? `Using JACOB_SOURCE_AGENT_JSON (${assignment.sourceMapEntries} source → agent rules). Falls back to GHL opportunity assignee if no match.`
+                : "Using GHL opportunity assignee fields only. Set JACOB_SOURCE_AGENT_JSON to assign by opportunity source (e.g. Facebook → Juan)."}
+            </p>
+          </div>
+        )}
         {callLog && (
           <div
             className={`mt-3 text-sm rounded-lg px-4 py-3 border ${
