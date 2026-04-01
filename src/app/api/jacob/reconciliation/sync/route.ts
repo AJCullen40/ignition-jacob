@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
       fetchJacobCallLogRows(),
       getScoringLeadsLite(),
     ]);
-    const report = buildReconciliationReport(
+    const report = await buildReconciliationReport(
       opps,
       calls,
       scoring,

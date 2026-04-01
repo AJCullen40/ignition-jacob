@@ -1,9 +1,7 @@
 import type { GHLOpportunity } from "@/lib/ghl";
 import type { CallLogFetchInfo } from "@/lib/jacob/call-log";
-import {
-  getOpportunitySourceAgentMap,
-  resolveAssignedAgentFromOpportunitySource,
-} from "@/lib/jacob/opportunity-source-agents";
+import { resolveAssignedAgentFromOpportunitySource } from "@/lib/jacob/opportunity-source-agents";
+import { loadMergedOpportunitySourceAgentMap } from "@/lib/jacob/setter-channel-assignments";
 import {
   categorizeStage,
   getAssignedAgentName,
@@ -42,6 +40,27 @@ export interface ChannelPerformanceRow {
   callsMade: number;
   consultationsBooked: number;
   conversionPct: number;
+}
+
+export interface JacobReconciliationReport {
+  generatedAt: string;
+  summary: AgentSummaryRow[];
+  details: ReconciliationDetailRow[];
+  channelBreakdown: ChannelPerformanceRow[];
+  callLog: {
+    source: "google_sheet";
+    sheetId: string | null;
+    gid: string;
+    configured: boolean;
+    rowsInTab: number;
+    rowsMatchedLast7d: number;
+    assumeOutboundWhenDirectionBlank: boolean;
+    note: string;
+  };
+  assignment: {
+    mode: "opportunity_source_map" | "ghl_opportunity_fields";
+    sourceMapEntries: number;
+  };
 }
 
 function normHeader(h: string): string {
@@ -314,35 +333,16 @@ export function buildAgentSummaryFromDetails(
     .sort((a, b) => b.notCalled - a.notCalled || b.assignedLeads - a.assignedLeads);
 }
 
-export function buildReconciliationReport(
+export async function buildReconciliationReport(
   opps: GHLOpportunity[],
   callRows: Record<string, string>[],
   scoringRows: Record<string, string>[],
   nowMs: number = Date.now(),
   callLogInfo: CallLogFetchInfo,
-): {
-  generatedAt: string;
-  summary: AgentSummaryRow[];
-  details: ReconciliationDetailRow[];
-  channelBreakdown: ChannelPerformanceRow[];
-  callLog: {
-    source: "google_sheet";
-    sheetId: string | null;
-    gid: string;
-    configured: boolean;
-    rowsInTab: number;
-    rowsMatchedLast7d: number;
-    assumeOutboundWhenDirectionBlank: boolean;
-    note: string;
-  };
-  assignment: {
-    mode: "opportunity_source_map" | "ghl_opportunity_fields";
-    sourceMapEntries: number;
-  };
-} {
+): Promise<JacobReconciliationReport> {
   const callIdx = indexCallLog(callRows, nowMs);
   const leadSourceById = scoringRowsToLeadSourceByContactId(scoringRows);
-  const sourceAgentMap = getOpportunitySourceAgentMap();
+  const sourceAgentMap = await loadMergedOpportunitySourceAgentMap();
 
   const warmHot = opps.filter((o) => isWarmOrHotPipelineStage(o.stageName));
 
@@ -526,7 +526,7 @@ export function reconciliationDetailsToCsv(
 }
 
 export function reconciliationToSheetValues(
-  report: ReturnType<typeof buildReconciliationReport>,
+  report: JacobReconciliationReport,
 ): (string | number)[][] {
   const lines: (string | number)[][] = [
     ["Assigned vs Called — Daily reconciliation (Warm/Hot)"],
