@@ -6,7 +6,10 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth-options";
 import { getAllOpportunities } from "@/lib/ghl";
 import { getScoringLeadsLite } from "@/lib/google-sheets";
-import { fetchJacobCallLogRows } from "@/lib/jacob/call-log";
+import {
+  fetchJacobCallLogRows,
+  getJacobCallLogFetchInfo,
+} from "@/lib/jacob/call-log";
 import {
   buildAgentSummaryFromDetails,
   buildChannelBreakdownFromDetails,
@@ -20,7 +23,13 @@ async function loadReport() {
     fetchJacobCallLogRows(),
     getScoringLeadsLite(),
   ]);
-  return buildReconciliationReport(opps, calls, scoring);
+  return buildReconciliationReport(
+    opps,
+    calls,
+    scoring,
+    Date.now(),
+    getJacobCallLogFetchInfo(),
+  );
 }
 
 export async function GET(req: NextRequest) {

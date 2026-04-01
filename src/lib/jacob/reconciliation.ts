@@ -1,4 +1,5 @@
 import type { GHLOpportunity } from "@/lib/ghl";
+import type { CallLogFetchInfo } from "@/lib/jacob/call-log";
 import {
   categorizeStage,
   getAssignedAgentName,
@@ -65,7 +66,10 @@ function parseRowDate(raw: string): number | null {
   return Number.isFinite(t) ? t : null;
 }
 
-function isOutboundDirection(row: Record<string, string>): boolean {
+function isOutboundDirection(
+  row: Record<string, string>,
+  assumeIfBlank: boolean,
+): boolean {
   const dir = findCell(row, [
     "Direction",
     "Call Direction",
@@ -73,9 +77,22 @@ function isOutboundDirection(row: Record<string, string>): boolean {
     "Call Type",
     "Inbound/Outbound",
   ]);
-  if (!dir) return false;
+  if (!dir) return assumeIfBlank;
   const d = dir.toLowerCase();
-  return d.includes("outbound") || d.includes("out bound") || /^out\b/.test(d);
+  if (d.includes("inbound") || d.includes("in bound")) return false;
+  return (
+    d.includes("outbound") ||
+    d.includes("out bound") ||
+    /^out\b/.test(d)
+  );
+}
+
+function normPhone10(raw: string | null | undefined): string {
+  if (!raw) return "";
+  const d = raw.replace(/\D/g, "");
+  if (d.length >= 11 && d[0] === "1") return d.slice(-10);
+  if (d.length >= 10) return d.slice(-10);
+  return "";
 }
 
 function callLogSourceSystem(row: Record<string, string>): "GHL" | "RingCentral" {
@@ -93,39 +110,49 @@ export interface CallStats {
   lastSource: "GHL" | "RingCentral";
 }
 
-/** Index: GHL contact id → outbound call stats in rolling 7-day window */
-export function indexCallLogByContactId(
+function mergeStats(a: CallStats, b: CallStats): CallStats {
+  const lastA = a.lastAt ?? 0;
+  const lastB = b.lastAt ?? 0;
+  const m = Math.max(lastA, lastB);
+  return {
+    outbound7d: a.outbound7d + b.outbound7d,
+    lastAt: m > 0 ? m : null,
+    lastSource: lastA >= lastB ? a.lastSource : b.lastSource,
+  };
+}
+
+export interface CallLogIndexMeta {
+  totalRows: number;
+  rowsCountedIn7dWindow: number;
+  assumeOutboundWhenDirectionBlank: boolean;
+}
+
+export interface CallLogIndexResult {
+  byContactId: Map<string, CallStats>;
+  byPhone: Map<string, CallStats>;
+  meta: CallLogIndexMeta;
+}
+
+/**
+ * Indexes outbound calls in the last 7 days by GHL contact id and by phone (last 10 digits).
+ * Set JACOB_CALL_LOG_ASSUME_OUTBOUND=false to require an explicit outbound direction column.
+ */
+export function indexCallLog(
   callRows: Record<string, string>[],
   nowMs: number = Date.now(),
-): Map<string, CallStats> {
-  const map = new Map<string, CallStats>();
+): CallLogIndexResult {
+  const assumeBlank =
+    process.env.JACOB_CALL_LOG_ASSUME_OUTBOUND?.trim().toLowerCase() !==
+    "false";
+
+  const byContactId = new Map<string, CallStats>();
+  const byPhone = new Map<string, CallStats>();
   const cutoff = nowMs - MS_7D;
+  let rowsCountedIn7dWindow = 0;
 
-  for (const row of callRows) {
-    if (!isOutboundDirection(row)) continue;
-
-    const contactId = findCell(row, [
-      "GHL Contact ID",
-      "Contact ID",
-      "Contact Id",
-      "GHL ID",
-      "Lead ID",
-    ]);
-
-    if (!contactId || contactId.length < 5) continue;
-
-    const dateRaw = findCell(row, [
-      "Call Date",
-      "Date",
-      "Started At",
-      "Timestamp",
-      "Call Time",
-    ]);
-    const ts = parseRowDate(dateRaw);
-    if (ts == null || ts < cutoff || ts > nowMs + 60_000) continue;
-
-    const src = callLogSourceSystem(row);
-    const cur = map.get(contactId) ?? {
+  const bump = (map: Map<string, CallStats>, key: string, ts: number, src: "GHL" | "RingCentral") => {
+    rowsCountedIn7dWindow += 1;
+    const cur = map.get(key) ?? {
       outbound7d: 0,
       lastAt: null as number | null,
       lastSource: "GHL" as const,
@@ -135,10 +162,70 @@ export function indexCallLogByContactId(
       cur.lastAt = ts;
       cur.lastSource = src;
     }
-    map.set(contactId, cur);
+    map.set(key, cur);
+  };
+
+  for (const row of callRows) {
+    if (!isOutboundDirection(row, assumeBlank)) continue;
+
+    const dateRaw = findCell(row, [
+      "Call Date",
+      "Date",
+      "Started At",
+      "Timestamp",
+      "Call Time",
+      "Date/Time",
+    ]);
+    const ts = parseRowDate(dateRaw);
+    if (ts == null || ts < cutoff || ts > nowMs + 60_000) continue;
+
+    const src = callLogSourceSystem(row);
+    const contactId = findCell(row, [
+      "GHL Contact ID",
+      "Contact ID",
+      "Contact Id",
+      "GHL ID",
+      "Lead ID",
+    ]);
+    const phoneRaw = findCell(row, [
+      "Phone",
+      "Phone Number",
+      "To",
+      "To Number",
+      "Dialed",
+      "Caller ID",
+    ]);
+    const phone = normPhone10(phoneRaw);
+
+    if (contactId.length >= 5) {
+      bump(byContactId, contactId, ts, src);
+    } else if (phone.length === 10) {
+      bump(byPhone, phone, ts, src);
+    }
   }
 
-  return map;
+  return {
+    byContactId,
+    byPhone,
+    meta: {
+      totalRows: callRows.length,
+      rowsCountedIn7dWindow,
+      assumeOutboundWhenDirectionBlank: assumeBlank,
+    },
+  };
+}
+
+function statsForOpportunity(
+  contactId: string,
+  contactPhone: string | null | undefined,
+  idx: CallLogIndexResult,
+): CallStats | undefined {
+  const a =
+    contactId.length >= 5 ? idx.byContactId.get(contactId) : undefined;
+  const p = normPhone10(contactPhone ?? "");
+  const b = p.length === 10 ? idx.byPhone.get(p) : undefined;
+  if (a && b) return mergeStats(a, b);
+  return a ?? b;
 }
 
 function scoreBucketFromStage(stageName: string): "Warm" | "Hot" {
@@ -228,16 +315,40 @@ export function buildReconciliationReport(
   callRows: Record<string, string>[],
   scoringRows: Record<string, string>[],
   nowMs: number = Date.now(),
+  callLogInfo: CallLogFetchInfo,
 ): {
   generatedAt: string;
   summary: AgentSummaryRow[];
   details: ReconciliationDetailRow[];
   channelBreakdown: ChannelPerformanceRow[];
+  callLog: {
+    source: "google_sheet";
+    sheetId: string | null;
+    gid: string;
+    configured: boolean;
+    rowsInTab: number;
+    rowsMatchedLast7d: number;
+    assumeOutboundWhenDirectionBlank: boolean;
+    note: string;
+  };
 } {
-  const callIndex = indexCallLogByContactId(callRows, nowMs);
+  const callIdx = indexCallLog(callRows, nowMs);
   const leadSourceById = scoringRowsToLeadSourceByContactId(scoringRows);
 
   const warmHot = opps.filter((o) => isWarmOrHotPipelineStage(o.stageName));
+
+  let note =
+    "Call counts come from the Google Sheet call log (not GHL’s reporting API).";
+  if (!callLogInfo.configured) {
+    note =
+      "Set JACOB_CALL_LOG_SHEET_ID (and JACOB_CALL_LOG_GID if not tab 0) to your published dialer/call export tab.";
+  } else if (callRows.length === 0) {
+    note =
+      "Call log tab returned 0 rows — check gid, publish settings, and that the tab is not empty.";
+  } else if (callIdx.meta.rowsCountedIn7dWindow === 0) {
+    note =
+      "No calls matched the last-7-day window. Check date column parsing, Direction (or set JACOB_CALL_LOG_ASSUME_OUTBOUND=false only if the sheet marks outbound explicitly), and that Contact ID or Phone matches GHL.";
+  }
 
   const details: ReconciliationDetailRow[] = warmHot.map((opp) => {
     const contactId = opp.contact?.id || "";
@@ -247,7 +358,11 @@ export function buildReconciliationReport(
       leadSourceById.get(contactId) ||
       (opp.source || "").trim() ||
       "Unknown";
-    const stats = callIndex.get(contactId);
+    const stats = statsForOpportunity(
+      contactId,
+      opp.contact?.phone,
+      callIdx,
+    );
     const calls = stats?.outbound7d ?? 0;
     const lastTs = stats?.lastAt ?? null;
     const cat = categorizeStage(opp.stageName);
@@ -330,6 +445,17 @@ export function buildReconciliationReport(
     summary,
     details,
     channelBreakdown,
+    callLog: {
+      source: "google_sheet",
+      sheetId: callLogInfo.sheetId,
+      gid: callLogInfo.gid,
+      configured: callLogInfo.configured,
+      rowsInTab: callRows.length,
+      rowsMatchedLast7d: callIdx.meta.rowsCountedIn7dWindow,
+      assumeOutboundWhenDirectionBlank:
+        callIdx.meta.assumeOutboundWhenDirectionBlank,
+      note,
+    },
   };
 }
 

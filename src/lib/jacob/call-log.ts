@@ -1,15 +1,37 @@
 import { fetchPublicSheetTabCsv } from "@/lib/google-sheets";
 
+export interface CallLogFetchInfo {
+  sheetId: string | null;
+  gid: string;
+  /** False when no sheet could be resolved — all call counts stay zero */
+  configured: boolean;
+}
+
 /**
- * Setter call scoring / dialer log tab (configure gid to the correct worksheet).
- * Expected columns (flexible header match in reconciliation): Contact ID, Call date, Direction, Agent, etc.
+ * Call activity is matched from a published Google Sheet tab (dialer / setter log),
+ * not from GHL’s native call APIs. Set JACOB_CALL_LOG_SHEET_ID + JACOB_CALL_LOG_GID
+ * to the workbook tab that contains one row per call with Contact ID (or phone) + date.
  */
-export async function fetchJacobCallLogRows(): Promise<Record<string, string>[]> {
-  const sheetId = process.env.JACOB_CALL_LOG_SHEET_ID?.trim();
+export function getJacobCallLogFetchInfo(): CallLogFetchInfo {
+  const explicit = process.env.JACOB_CALL_LOG_SHEET_ID?.trim();
   const gid = process.env.JACOB_CALL_LOG_GID?.trim() || "0";
-  if (!sheetId) {
-    console.warn("[jacob/call-log] JACOB_CALL_LOG_SHEET_ID not set — reconciliation will show zero calls.");
+  const sheetId = explicit || null;
+  const configured = Boolean(sheetId);
+  return { sheetId, gid, configured };
+}
+
+export async function fetchJacobCallLogRows(): Promise<Record<string, string>[]> {
+  const { sheetId, gid, configured } = getJacobCallLogFetchInfo();
+  if (!configured) {
+    console.warn(
+      "[jacob/call-log] Set JACOB_CALL_LOG_SHEET_ID to the Google Sheet that holds call rows (same or different workbook as scoring).",
+    );
     return [];
   }
-  return fetchPublicSheetTabCsv(sheetId, gid);
+  try {
+    return await fetchPublicSheetTabCsv(sheetId!, gid);
+  } catch (e) {
+    console.error("[jacob/call-log] Fetch failed:", e);
+    return [];
+  }
 }

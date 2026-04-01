@@ -6,7 +6,10 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth-options";
 import { getAllOpportunities } from "@/lib/ghl";
 import { getScoringLeadsLite } from "@/lib/google-sheets";
-import { fetchJacobCallLogRows } from "@/lib/jacob/call-log";
+import {
+  fetchJacobCallLogRows,
+  getJacobCallLogFetchInfo,
+} from "@/lib/jacob/call-log";
 import {
   buildReconciliationReport,
   reconciliationToSheetValues,
@@ -42,7 +45,13 @@ export async function POST(req: NextRequest) {
       fetchJacobCallLogRows(),
       getScoringLeadsLite(),
     ]);
-    const report = buildReconciliationReport(opps, calls, scoring);
+    const report = buildReconciliationReport(
+      opps,
+      calls,
+      scoring,
+      Date.now(),
+      getJacobCallLogFetchInfo(),
+    );
     const grid = reconciliationToSheetValues(report);
 
     let sheetSynced = false;

@@ -33,6 +33,15 @@ type ChannelRow = {
   conversionPct: number;
 };
 
+type CallLogInfo = {
+  source: string;
+  configured: boolean;
+  rowsInTab: number;
+  rowsMatchedLast7d: number;
+  assumeOutboundWhenDirectionBlank: boolean;
+  note: string;
+};
+
 export default function JacobReconciliationPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -44,6 +53,7 @@ export default function JacobReconciliationPage() {
   const [channelFilter, setChannelFilter] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [callLog, setCallLog] = useState<CallLogInfo | null>(null);
 
   const qs = useMemo(() => {
     const p = new URLSearchParams();
@@ -106,9 +116,31 @@ export default function JacobReconciliationPage() {
           Assigned vs Called — Warm / Hot reconciliation
         </h1>
         <p className="text-sm text-gray-500 mt-1">
-          GHL pipeline (Qualified + Hot Lead) vs outbound calls in the call log
-          (last 7 days). Filter by agent or channel for Karima’s SOP.
+          <strong>Leads</strong> come from GHL (Qualified + Hot Lead stages).{" "}
+          <strong>Calls</strong> are matched from a{" "}
+          <strong>Google Sheet call log</strong> (env{" "}
+          <code className="text-xs bg-gray-100 px-1 rounded">JACOB_CALL_LOG_SHEET_ID</code>
+          ) — not from GHL’s native call report. Last 7 days, outbound rows (or
+          all rows if Direction is blank and assume-outbound is on).
         </p>
+        {callLog && (
+          <div
+            className={`mt-3 text-sm rounded-lg px-4 py-3 border ${
+              callLog.rowsMatchedLast7d > 0
+                ? "bg-green-50 border-green-200 text-green-900"
+                : "bg-amber-50 border-amber-200 text-amber-950"
+            }`}
+          >
+            <p className="font-medium">Call log status</p>
+            <p className="mt-1 text-xs opacity-90">
+              Sheet configured: {callLog.configured ? "yes" : "no"} · Rows in
+              tab: {callLog.rowsInTab} · Matched in 7d window:{" "}
+              {callLog.rowsMatchedLast7d} · Assume outbound if Direction empty:{" "}
+              {callLog.assumeOutboundWhenDirectionBlank ? "yes" : "no"}
+            </p>
+            <p className="mt-2 text-xs">{callLog.note}</p>
+          </div>
+        )}
         {generatedAt && (
           <p className="text-xs text-gray-400 mt-2">
             Last built: {new Date(generatedAt).toLocaleString()}
@@ -195,7 +227,11 @@ export default function JacobReconciliationPage() {
                   <td className="px-4 py-2">{s.assignedLeads}</td>
                   <td className="px-4 py-2 text-green-700">{s.called}</td>
                   <td className="px-4 py-2 text-red-600">{s.notCalled}</td>
-                  <td className="px-4 py-2">{s.coveragePct}%</td>
+                  <td className="px-4 py-2">
+                    {Number.isFinite(s.coveragePct)
+                      ? `${s.coveragePct.toFixed(1)}%`
+                      : "—"}
+                  </td>
                 </tr>
               ))}
               {!loading && summary.length === 0 && (
