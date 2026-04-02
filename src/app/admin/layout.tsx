@@ -83,6 +83,7 @@ const sections: NavSection[] = [
     defaultOpen: true,
     links: [
       { label: "Assigned vs Called", href: "/admin/jacob/reconciliation" },
+      { label: "Referral partners", href: "/admin/jacob/referral-partners" },
       { label: "Closers scoring", href: "/admin/jacob/closers-scoring" },
     ],
   },

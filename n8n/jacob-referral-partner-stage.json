@@ -1,0 +1,101 @@
+{
+  "name": "Jacob — Referral Partner stage → Ignition log",
+  "meta": {
+    "description": "Import on pilot.ignitionsystems.io. 1) GHL Workflow: when opportunity stage → Referral Partner, POST full payload to this webhook. 2) Set n8n env: IGNITION_REFERRAL_LOG_URL (e.g. https://ignition-jacob.vercel.app/api/jacob/referral-partners/log), JACOB_REFERRAL_PARTNER_WEBHOOK_SECRET (same as Vercel). 3) Adjust Code node field paths after one live GHL execution. 4) Sheet tab 'Referral Partner Log' + header row (see admin/jacob/referral-partners)."
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "jacob-ghl-referral-partner-stage",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "wh-ref",
+      "name": "GHL Referral Partner Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "replace-after-import"
+    },
+    {
+      "parameters": {
+        "jsCode": "const root = $json.body ?? $json;\nconst stage =\n  root.pipeline_stage_name ??\n  root.pipelineStageName ??\n  root.stage_name ??\n  root.stageName ??\n  root.newStageName ??\n  root.opportunity?.pipelineStageName ??\n  root.opportunity?.stageName ??\n  '';\nconst stageStr = String(stage).toLowerCase();\nconst isReferral = stageStr.includes('referral partner');\nreturn [{\n  json: {\n    isReferralPartnerStage: isReferral,\n    receivedAt: new Date().toISOString(),\n    event: root.event_type || root.type || 'opportunity_stage',\n    ghlContactId: root.contact_id || root.contactId || root.contact?.id || root.opportunity?.contactId,\n    ghlOpportunityId: root.opportunity_id || root.opportunityId || root.opportunity?.id,\n    contactName: root.contact_name || root.contactName || root.contact?.name,\n    pipelineStageName: String(stage || ''),\n    opportunitySource: root.source || root.opportunity?.source,\n    notes: '',\n    raw: root\n  }\n}];"
+      },
+      "id": "code-map",
+      "name": "Map GHL → log body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.isReferralPartnerStage }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-ref",
+      "name": "IF Referral Partner stage",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.IGNITION_REFERRAL_LOG_URL}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.JACOB_REFERRAL_PARTNER_WEBHOOK_SECRET}}"
+            },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  receivedAt: $json.receivedAt,\n  event: $json.event,\n  ghlContactId: $json.ghlContactId,\n  ghlOpportunityId: $json.ghlOpportunityId,\n  contactName: $json.contactName,\n  pipelineStageName: $json.pipelineStageName,\n  opportunitySource: $json.opportunitySource,\n  notes: $json.notes,\n  raw: $json.raw\n}) }}",
+        "options": {}
+      },
+      "id": "http-log",
+      "name": "POST Referral log to Ignition",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [940, 220]
+    },
+    {
+      "parameters": {},
+      "id": "noop",
+      "name": "Skip (not Referral Partner)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [940, 400]
+    }
+  ],
+  "connections": {
+    "GHL Referral Partner Webhook": {
+      "main": [[{ "node": "Map GHL → log body", "type": "main", "index": 0 }]]
+    },
+    "Map GHL → log body": {
+      "main": [[{ "node": "IF Referral Partner stage", "type": "main", "index": 0 }]]
+    },
+    "IF Referral Partner stage": {
+      "main": [
+        [{ "node": "POST Referral log to Ignition", "type": "main", "index": 0 }],
+        [{ "node": "Skip (not Referral Partner)", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}
