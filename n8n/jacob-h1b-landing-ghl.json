@@ -1,0 +1,938 @@
+{
+  "updatedAt": "2026-04-07T20:22:46.516Z",
+  "createdAt": "2026-02-27T02:43:02.237Z",
+  "id": "foKmv5udyxEn1Aaj",
+  "name": "H1B Landing Page Form \u2192 GHL + Email - Jacob Sapochnick",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "jacob-h1b-intake",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        304
+      ],
+      "id": "a1",
+      "name": "Landing Page Form",
+      "webhookId": "jacob-h1b-intake"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body || $json;\nconst firstName = (body.first_name || '').toString().trim();\nconst lastName = (body.last_name || '').toString().trim();\nlet phone = (body.phone || '').toString().trim();\nconst email = (body.email || '').toString().trim();\nconst matter = (body.immigration_matter || 'Not specified').toString().trim();\n\n// Normalize phone - remove spaces, dashes, parens\nlet cleanPhone = phone.replace(/[\\s\\-\\(\\)]/g, '');\n\n// Detect international: if it starts with + and NOT +1, it's international\n// Also handle numbers that don't start with + but aren't 10-11 digit US numbers\nlet isInternational = false;\nif (cleanPhone.startsWith('+') && !cleanPhone.startsWith('+1')) {\n  isInternational = true;\n} else if (!cleanPhone.startsWith('+') && !cleanPhone.startsWith('1') && cleanPhone.length > 10) {\n  isInternational = true;\n}\n\n// For GHL, format US numbers with +1 prefix\nlet ghlPhone = cleanPhone;\nif (!isInternational) {\n  ghlPhone = cleanPhone.replace(/^\\+?1?/, '');\n  if (ghlPhone.length === 10) ghlPhone = '+1' + ghlPhone;\n}\n\n// For WATI, need number without + prefix\nlet watiPhone = cleanPhone.replace(/^\\+/, '');\n\nconst tags = ['Cold Paid Media', 'ai sdr start'];\nif (isInternational) tags.push('international');\n\nreturn [{\n  json: {\n    firstName,\n    lastName,\n    phone: ghlPhone,\n    watiPhone,\n    email,\n    matter,\n    source: 'Cold Paid Media',\n    tags,\n    isInternational,\n    hasContact: !!(phone || email)\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        304
+      ],
+      "id": "a2",
+      "name": "Format Contact Data"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.hasContact }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        688,
+        304
+      ],
+      "id": "a3",
+      "name": "Has Contact Info?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://rest.gohighlevel.com/v1/contacts/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJsb2NhdGlvbl9pZCI6ImtwQ3I3a1hMbVc1S1BzV3JDRkUwIiwiY29tcGFueV9pZCI6InljdDRINDV0bGMxcmZuUFY4R3pQIiwidmVyc2lvbiI6MSwiaWF0IjoxNzAxNzE5NTUzNzAwLCJzdWIiOiJ1c2VyX2lkIn0.QZpmgBBQP8-3Tcz-VEfTnK8euSqk4wYUAT2cxXpVx14"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"firstName\": \"{{ $json.firstName }}\", \"lastName\": \"{{ $json.lastName }}\", \"phone\": \"{{ $json.phone }}\", \"email\": \"{{ $json.email }}\", \"source\": \"Consult Landing Page\", \"tags\": {{ JSON.stringify($json.tags) }}, \"customField\": {\"j0jLuiUDqMN22XlGGytt\": \"{{ $json.matter }}\", \"sIZdZBf6CMLw8xIYKPyf\": \"Consult Landing Page\"}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        64
+      ],
+      "id": "a4",
+      "name": "Create Contact in GHL",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://rest.gohighlevel.com/v1/pipelines/LBDjBddvfIA9HXk4Oe1Y/opportunities/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJsb2NhdGlvbl9pZCI6ImtwQ3I3a1hMbVc1S1BzV3JDRkUwIiwiY29tcGFueV9pZCI6InljdDRINDV0bGMxcmZuUFY4R3pQIiwidmVyc2lvbiI6MSwiaWF0IjoxNzAxNzE5NTUzNzAwLCJzdWIiOiJ1c2VyX2lkIn0.QZpmgBBQP8-3Tcz-VEfTnK8euSqk4wYUAT2cxXpVx14"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"title\": \"{{ $('Format Contact Data').item.json.firstName }} {{ $('Format Contact Data').item.json.lastName }} - H1B LP\", \"stageId\": \"583c8c43-7070-4c13-82aa-7a4ecfd5948e\", \"status\": \"open\", \"contactId\": \"{{ $('Create Contact in GHL').item.json.contact.id }}\", \"source\": \"Consult Landing Page\"}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        208
+      ],
+      "id": "a5",
+      "name": "Add to Pipeline",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "jacobsapochnick@ignitionsystems.io",
+        "subject": "=\ud83d\udea8 New H1B Landing Page Lead: {{ $('Format Contact Data').item.json.firstName }} {{ $('Format Contact Data').item.json.lastName }}",
+        "emailType": "text",
+        "message": "=New lead from consult.h1b.biz\n\nName: {{ $('Format Contact Data').item.json.firstName }} {{ $('Format Contact Data').item.json.lastName }}\nEmail: {{ $('Format Contact Data').item.json.email }}\nPhone: {{ $('Format Contact Data').item.json.phone }}\nMatter: {{ $('Format Contact Data').item.json.matter }}\nSource: Cold Paid Media\n\nThis lead has been added to GHL pipeline (New Lead No Response) with tag 'Cold Paid Media'. MicheleAI will begin outreach.",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1440,
+        208
+      ],
+      "id": "a6",
+      "name": "Email Notification",
+      "webhookId": "9dfc7d62-eea8-442b-a43b-56f278ff51da",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "PgqYlOywdJYlIXl5",
+          "name": "jacobsapochnick@ignitionsystems.io"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"success\": true, \"message\": \"Thank you! Our team will contact you in a minute.\"}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1440,
+        400
+      ],
+      "id": "a7",
+      "name": "Success Response"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"success\": false, \"message\": \"Please provide contact information.\"}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        928,
+        448
+      ],
+      "id": "a8",
+      "name": "Error Response"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://rest.gohighlevel.com/v1/contacts/{{ $('Create Contact in GHL').item.json.contact.id }}/tags/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJsb2NhdGlvbl9pZCI6ImtwQ3I3a1hMbVc1S1BzV3JDRkUwIiwiY29tcGFueV9pZCI6InljdDRINDV0bGMxcmZuUFY4R3pQIiwidmVyc2lvbiI6MSwiaWF0IjoxNzAxNzE5NTUzNzAwLCJzdWIiOiJ1c2VyX2lkIn0.QZpmgBBQP8-3Tcz-VEfTnK8euSqk4wYUAT2cxXpVx14"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"tags\": {{ JSON.stringify($(\"Format Contact Data\").item.json.tags) }}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        208
+      ],
+      "id": "a9",
+      "name": "Add Tags",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://rest.gohighlevel.com/v1/contacts/{{ $('Create Contact in GHL').item.json.contact.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJsb2NhdGlvbl9pZCI6ImtwQ3I3a1hMbVc1S1BzV3JDRkUwIiwiY29tcGFueV9pZCI6InljdDRINDV0bGMxcmZuUFY4R3pQIiwidmVyc2lvbiI6MSwiaWF0IjoxNzAxNzE5NTUzNzAwLCJzdWIiOiJ1c2VyX2lkIn0.QZpmgBBQP8-3Tcz-VEfTnK8euSqk4wYUAT2cxXpVx14"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"firstName\": \"{{ $('Format Contact Data').item.json.firstName }}\", \"lastName\": \"{{ $('Format Contact Data').item.json.lastName }}\", \"email\": \"{{ $('Format Contact Data').item.json.email }}\"}",
+        "options": {}
+      },
+      "id": "update-contact-ghl",
+      "name": "Update Contact in GHL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        80
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "intl-check",
+              "leftValue": "={{ $('Format Contact Data').item.json.isInternational }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "intl-check-node",
+      "name": "Is International?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        816,
+        592
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://live-mt-server.wati.io/1046949/api/v2/sendTemplateMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJhODIwZjFiZS1kODRkLTRlMTQtODczZC1lNDc3NGM4MDE5OTYiLCJ1bmlxdWVfbmFtZSI6ImphY29ic2Fwb2Nobmlja0BpZ25pdGlvbnN5c3RlbXMuaW8iLCJuYW1laWQiOiJqYWNvYnNhcG9jaG5pY2tAaWduaXRpb25zeXN0ZW1zLmlvIiwiZW1haWwiOiJqYWNvYnNhcG9jaG5pY2tAaWduaXRpb25zeXN0ZW1zLmlvIiwiYXV0aF90aW1lIjoiMTEvMTUvMjAyNSAxNTowMzo0MSIsInRlbmFudF9pZCI6IjEwNDY5NDkiLCJkYl9uYW1lIjoibXQtcHJvZC1UZW5hbnRzIiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy9yb2xlIjoiQURNSU5JU1RSQVRPUiIsImV4cCI6MjUzNDAyMzAwODAwLCJpc3MiOiJDbGFyZV9BSSIsImF1ZCI6IkNsYXJlX0FJIn0.bmyhSHWN01xrnjcjt8iJZ-Vq7znOuTZ8WPAqOv0wilc"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"template_name\": \"hr_v3\", \"broadcast_name\": \"h1b_landing_page_intl\", \"parameters\": [{\"name\": \"name\", \"value\": \"{{ $('Format Contact Data').item.json.firstName }}\"}]}",
+        "options": {},
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "whatsappNumber",
+              "value": "={{ $(\"Format Contact Data\").item.json.watiPhone }}"
+            }
+          ]
+        }
+      },
+      "id": "wati-intl-node",
+      "name": "WATI: Send Template (Intl)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1104,
+        608
+      ]
+    }
+  ],
+  "connections": {
+    "Landing Page Form": {
+      "main": [
+        [
+          {
+            "node": "Format Contact Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Contact Data": {
+      "main": [
+        [
+          {
+            "node": "Has Contact Info?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Contact Info?": {
+      "main": [
+        [
+          {
+            "node": "Create Contact in GHL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Contact in GHL": {
+      "main": [
+        [
+          {
+            "node": "Update Contact in GHL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add to Pipeline": {
+      "main": [
+        [
+          {
+            "node": "Email Notification",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Tags": {
+      "main": [
+        [
+          {
+            "node": "Is International?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Contact in GHL": {
+      "main": [
+        [
+          {
+            "node": "Add Tags",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is International?": {
+      "main": [
+        [
+          {
+            "node": "WATI: Send Template (Intl)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Add to Pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Add to Pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": {},
+  "versionId": "13abba1a-f489-4496-a5cf-3d2840520f9c",
+  "activeVersionId": "13abba1a-f489-4496-a5cf-3d2840520f9c",
+  "versionCounter": 73,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-02-27T02:43:02.237Z",
+      "createdAt": "2026-02-27T02:43:02.237Z",
+      "role": "workflow:owner",
+      "workflowId": "foKmv5udyxEn1Aaj",
+      "projectId": "D4jHZpHvURBfwbG3",
+      "project": {
+        "updatedAt": "2024-12-13T14:46:16.338Z",
+        "createdAt": "2024-12-13T14:44:16.185Z",
+        "id": "D4jHZpHvURBfwbG3",
+        "name": "Anthony Cullen <admin@igntionsystems.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "84cb4f1a-4e7f-4cc2-b5d3-761f362da2f1",
+        "projectRelations": [
+          {
+            "updatedAt": "2024-12-13T14:44:16.185Z",
+            "createdAt": "2024-12-13T14:44:16.185Z",
+            "userId": "84cb4f1a-4e7f-4cc2-b5d3-761f362da2f1",
+            "projectId": "D4jHZpHvURBfwbG3",
+            "user": {
+              "updatedAt": "2026-04-07T20:10:39.501Z",
+              "createdAt": "2024-12-13T14:44:15.784Z",
+              "id": "84cb4f1a-4e7f-4cc2-b5d3-761f362da2f1",
+              "email": "admin@igntionsystems.com",
+              "firstName": "Anthony",
+              "lastName": "Cullen",
+              "personalizationAnswers": {
+                "version": "v4",
+                "personalization_survey_submitted_at": "2024-12-13T14:47:38.059Z",
+                "personalization_survey_n8n_version": "1.72.1"
+              },
+              "settings": {
+                "userActivated": true,
+                "easyAIWorkflowOnboarded": true,
+                "firstSuccessfulWorkflowId": "5DecO4gv0RLzdj8Y",
+                "userActivatedAt": 1734382266096,
+                "npsSurvey": {
+                  "responded": true,
+                  "lastShownAt": 1770657536009
+                }
+              },
+              "disabled": false,
+              "mfaEnabled": false,
+              "lastActiveAt": "2026-04-07",
+              "isPending": false
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-04-07T20:22:46.518Z",
+    "createdAt": "2026-04-07T20:22:46.518Z",
+    "versionId": "13abba1a-f489-4496-a5cf-3d2840520f9c",
+    "workflowId": "foKmv5udyxEn1Aaj",
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "jacob-h1b-intake",
+          "responseMode": "responseNode",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          240,
+          304
+        ],
+        "id": "a1",
+        "name": "Landing Page Form",
+        "webhookId": "jacob-h1b-intake"
+      },
+      {
+        "parameters": {
+          "jsCode": "const body = $json.body || $json;\nconst firstName = (body.first_name || '').toString().trim();\nconst lastName = (body.last_name || '').toString().trim();\nlet phone = (body.phone || '').toString().trim();\nconst email = (body.email || '').toString().trim();\nconst matter = (body.immigration_matter || 'Not specified').toString().trim();\n\n// Normalize phone - remove spaces, dashes, parens\nlet cleanPhone = phone.replace(/[\\s\\-\\(\\)]/g, '');\n\n// Detect international: if it starts with + and NOT +1, it's international\n// Also handle numbers that don't start with + but aren't 10-11 digit US numbers\nlet isInternational = false;\nif (cleanPhone.startsWith('+') && !cleanPhone.startsWith('+1')) {\n  isInternational = true;\n} else if (!cleanPhone.startsWith('+') && !cleanPhone.startsWith('1') && cleanPhone.length > 10) {\n  isInternational = true;\n}\n\n// For GHL, format US numbers with +1 prefix\nlet ghlPhone = cleanPhone;\nif (!isInternational) {\n  ghlPhone = cleanPhone.replace(/^\\+?1?/, '');\n  if (ghlPhone.length === 10) ghlPhone = '+1' + ghlPhone;\n}\n\n// For WATI, need number without + prefix\nlet watiPhone = cleanPhone.replace(/^\\+/, '');\n\nconst tags = ['Cold Paid Media', 'ai sdr start'];\nif (isInternational) tags.push('international');\n\nreturn [{\n  json: {\n    firstName,\n    lastName,\n    phone: ghlPhone,\n    watiPhone,\n    email,\n    matter,\n    source: 'Cold Paid Media',\n    tags,\n    isInternational,\n    hasContact: !!(phone || email)\n  }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          464,
+          304
+        ],
+        "id": "a2",
+        "name": "Format Contact Data"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": ""
+            },
+            "conditions": [
+              {
+                "id": "cond1",
+                "leftValue": "={{ $json.hasContact }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "equals",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          688,
+          304
+        ],
+        "id": "a3",
+        "name": "Has Contact Info?"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://rest.gohighlevel.com/v1/contacts/",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJsb2NhdGlvbl9pZCI6ImtwQ3I3a1hMbVc1S1BzV3JDRkUwIiwiY29tcGFueV9pZCI6InljdDRINDV0bGMxcmZuUFY4R3pQIiwidmVyc2lvbiI6MSwiaWF0IjoxNzAxNzE5NTUzNzAwLCJzdWIiOiJ1c2VyX2lkIn0.QZpmgBBQP8-3Tcz-VEfTnK8euSqk4wYUAT2cxXpVx14"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\"firstName\": \"{{ $json.firstName }}\", \"lastName\": \"{{ $json.lastName }}\", \"phone\": \"{{ $json.phone }}\", \"email\": \"{{ $json.email }}\", \"source\": \"Consult Landing Page\", \"tags\": {{ JSON.stringify($json.tags) }}, \"customField\": {\"j0jLuiUDqMN22XlGGytt\": \"{{ $json.matter }}\", \"sIZdZBf6CMLw8xIYKPyf\": \"Consult Landing Page\"}}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          880,
+          64
+        ],
+        "id": "a4",
+        "name": "Create Contact in GHL",
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "=https://rest.gohighlevel.com/v1/pipelines/LBDjBddvfIA9HXk4Oe1Y/opportunities/",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJsb2NhdGlvbl9pZCI6ImtwQ3I3a1hMbVc1S1BzV3JDRkUwIiwiY29tcGFueV9pZCI6InljdDRINDV0bGMxcmZuUFY4R3pQIiwidmVyc2lvbiI6MSwiaWF0IjoxNzAxNzE5NTUzNzAwLCJzdWIiOiJ1c2VyX2lkIn0.QZpmgBBQP8-3Tcz-VEfTnK8euSqk4wYUAT2cxXpVx14"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\"title\": \"{{ $('Format Contact Data').item.json.firstName }} {{ $('Format Contact Data').item.json.lastName }} - H1B LP\", \"stageId\": \"583c8c43-7070-4c13-82aa-7a4ecfd5948e\", \"status\": \"open\", \"contactId\": \"{{ $('Create Contact in GHL').item.json.contact.id }}\", \"source\": \"Consult Landing Page\"}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1200,
+          208
+        ],
+        "id": "a5",
+        "name": "Add to Pipeline",
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "sendTo": "jacobsapochnick@ignitionsystems.io",
+          "subject": "=\ud83d\udea8 New H1B Landing Page Lead: {{ $('Format Contact Data').item.json.firstName }} {{ $('Format Contact Data').item.json.lastName }}",
+          "emailType": "text",
+          "message": "=New lead from consult.h1b.biz\n\nName: {{ $('Format Contact Data').item.json.firstName }} {{ $('Format Contact Data').item.json.lastName }}\nEmail: {{ $('Format Contact Data').item.json.email }}\nPhone: {{ $('Format Contact Data').item.json.phone }}\nMatter: {{ $('Format Contact Data').item.json.matter }}\nSource: Cold Paid Media\n\nThis lead has been added to GHL pipeline (New Lead No Response) with tag 'Cold Paid Media'. MicheleAI will begin outreach.",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.gmail",
+        "typeVersion": 2.1,
+        "position": [
+          1440,
+          208
+        ],
+        "id": "a6",
+        "name": "Email Notification",
+        "webhookId": "9dfc7d62-eea8-442b-a43b-56f278ff51da",
+        "credentials": {
+          "gmailOAuth2": {
+            "id": "PgqYlOywdJYlIXl5",
+            "name": "jacobsapochnick@ignitionsystems.io"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={\"success\": true, \"message\": \"Thank you! Our team will contact you in a minute.\"}",
+          "options": {
+            "responseCode": 200
+          }
+        },
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.1,
+        "position": [
+          1440,
+          400
+        ],
+        "id": "a7",
+        "name": "Success Response"
+      },
+      {
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={\"success\": false, \"message\": \"Please provide contact information.\"}",
+          "options": {
+            "responseCode": 400
+          }
+        },
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.1,
+        "position": [
+          928,
+          448
+        ],
+        "id": "a8",
+        "name": "Error Response"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "=https://rest.gohighlevel.com/v1/contacts/{{ $('Create Contact in GHL').item.json.contact.id }}/tags/",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJsb2NhdGlvbl9pZCI6ImtwQ3I3a1hMbVc1S1BzV3JDRkUwIiwiY29tcGFueV9pZCI6InljdDRINDV0bGMxcmZuUFY4R3pQIiwidmVyc2lvbiI6MSwiaWF0IjoxNzAxNzE5NTUzNzAwLCJzdWIiOiJ1c2VyX2lkIn0.QZpmgBBQP8-3Tcz-VEfTnK8euSqk4wYUAT2cxXpVx14"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\"tags\": {{ JSON.stringify($(\"Format Contact Data\").item.json.tags) }}}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1040,
+          208
+        ],
+        "id": "a9",
+        "name": "Add Tags",
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "method": "PUT",
+          "url": "=https://rest.gohighlevel.com/v1/contacts/{{ $('Create Contact in GHL').item.json.contact.id }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJsb2NhdGlvbl9pZCI6ImtwQ3I3a1hMbVc1S1BzV3JDRkUwIiwiY29tcGFueV9pZCI6InljdDRINDV0bGMxcmZuUFY4R3pQIiwidmVyc2lvbiI6MSwiaWF0IjoxNzAxNzE5NTUzNzAwLCJzdWIiOiJ1c2VyX2lkIn0.QZpmgBBQP8-3Tcz-VEfTnK8euSqk4wYUAT2cxXpVx14"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\"firstName\": \"{{ $('Format Contact Data').item.json.firstName }}\", \"lastName\": \"{{ $('Format Contact Data').item.json.lastName }}\", \"email\": \"{{ $('Format Contact Data').item.json.email }}\"}",
+          "options": {}
+        },
+        "id": "update-contact-ghl",
+        "name": "Update Contact in GHL",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1040,
+          80
+        ],
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "intl-check",
+                "leftValue": "={{ $('Format Contact Data').item.json.isInternational }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "intl-check-node",
+        "name": "Is International?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          816,
+          592
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://live-mt-server.wati.io/1046949/api/v2/sendTemplateMessage",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJhODIwZjFiZS1kODRkLTRlMTQtODczZC1lNDc3NGM4MDE5OTYiLCJ1bmlxdWVfbmFtZSI6ImphY29ic2Fwb2Nobmlja0BpZ25pdGlvbnN5c3RlbXMuaW8iLCJuYW1laWQiOiJqYWNvYnNhcG9jaG5pY2tAaWduaXRpb25zeXN0ZW1zLmlvIiwiZW1haWwiOiJqYWNvYnNhcG9jaG5pY2tAaWduaXRpb25zeXN0ZW1zLmlvIiwiYXV0aF90aW1lIjoiMTEvMTUvMjAyNSAxNTowMzo0MSIsInRlbmFudF9pZCI6IjEwNDY5NDkiLCJkYl9uYW1lIjoibXQtcHJvZC1UZW5hbnRzIiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy9yb2xlIjoiQURNSU5JU1RSQVRPUiIsImV4cCI6MjUzNDAyMzAwODAwLCJpc3MiOiJDbGFyZV9BSSIsImF1ZCI6IkNsYXJlX0FJIn0.bmyhSHWN01xrnjcjt8iJZ-Vq7znOuTZ8WPAqOv0wilc"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\"template_name\": \"hr_v3\", \"broadcast_name\": \"h1b_landing_page_intl\", \"parameters\": [{\"name\": \"name\", \"value\": \"{{ $('Format Contact Data').item.json.firstName }}\"}]}",
+          "options": {},
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "whatsappNumber",
+                "value": "={{ $(\"Format Contact Data\").item.json.watiPhone }}"
+              }
+            ]
+          }
+        },
+        "id": "wati-intl-node",
+        "name": "WATI: Send Template (Intl)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1104,
+          608
+        ]
+      }
+    ],
+    "connections": {
+      "Landing Page Form": {
+        "main": [
+          [
+            {
+              "node": "Format Contact Data",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Format Contact Data": {
+        "main": [
+          [
+            {
+              "node": "Has Contact Info?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Has Contact Info?": {
+        "main": [
+          [
+            {
+              "node": "Create Contact in GHL",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Error Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Create Contact in GHL": {
+        "main": [
+          [
+            {
+              "node": "Update Contact in GHL",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Add to Pipeline": {
+        "main": [
+          [
+            {
+              "node": "Email Notification",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Success Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Add Tags": {
+        "main": [
+          [
+            {
+              "node": "Is International?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Update Contact in GHL": {
+        "main": [
+          [
+            {
+              "node": "Add Tags",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Is International?": {
+        "main": [
+          [
+            {
+              "node": "WATI: Send Template (Intl)",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Add to Pipeline",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Add to Pipeline",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Anthony Cullen",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-04-07T20:22:46.585Z",
+        "id": 2317,
+        "workflowId": "foKmv5udyxEn1Aaj",
+        "versionId": "13abba1a-f489-4496-a5cf-3d2840520f9c",
+        "event": "activated",
+        "userId": "84cb4f1a-4e7f-4cc2-b5d3-761f362da2f1"
+      }
+    ]
+  }
+}
